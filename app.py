@@ -7,7 +7,7 @@ from FinMind.data import DataLoader
 from datetime import datetime, timedelta
 
 # --- 1. 頁面與視覺設定 ---
-st.set_page_config(page_title="v16.0 旗艦投資組合系統", layout="wide", page_icon="📈")
+st.set_page_config(page_title="投資組合系統", layout="wide", page_icon="📈")
 
 # 設定圖表風格
 plt.style.use('bmh')
@@ -30,7 +30,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title('🎓 旗艦級投資組合分析系統 (Final Project)')
+st.title('🎓 投資組合分析系統 (Final Project)')
 st.caption("v16.0 | 修正報酬率顯示 (年化/總報酬) | 放大熱力圖矩陣 | 介面優化")
 
 # --- 2. 側邊欄 ---
@@ -309,3 +309,4 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
             
             final = sim_df.iloc[-1]
             st.success(f"P95: {np.percentile(final, 95):.2f} | P05: {np.percentile(final, 5):.2f}")
+
