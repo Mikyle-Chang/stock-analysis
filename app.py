@@ -25,6 +25,8 @@ def calculate_mdd(series):
 @st.cache_data(ttl=3600)
 def fetch_stock_data(tickers_tw, tickers_us, start, end):
     data_dict = {}
+    
+    # 確保抓取 0050 以備 Beta 計算使用
     unique_tw = list(set(tickers_tw + ['0050']))
     
     for s in unique_tw:
@@ -89,7 +91,7 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
         st.subheader("📋 統計特徵")
         res_df = pd.DataFrame(index=returns.columns)
         total_days = (df_prices.index[-1] - df_prices.index[0]).days
-        years = max(total_days / 365.25, 0.1) # 避免除以零
+        years = total_days / 365.25
         
         res_df['年化報酬'] = (df_prices.iloc[-1] / df_prices.iloc[0]) ** (1 / years) - 1
         res_df['年化波動'] = returns.std() * np.sqrt(252)
@@ -121,6 +123,7 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
 
     with tab4:
         st.subheader("📐 市場模型 (Beta)")
+        
         if 'SPY' in returns.columns:
             mkt = 'SPY'
         elif '0050' in returns.columns:
@@ -149,13 +152,15 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
         for i in range(num_simulations):
             w = np.random.random(len(returns.columns))
             w /= w.sum()
-            all_weights[i, :] = w  # 修正 1: 移除 emoji 索引，改用標準 numpy 索引
+            # 修正處 1：使用冒號 :
+            all_weights[i, 🙂 = w
             p_r = np.sum(w * r_mean)
             p_v = np.sqrt(np.dot(w.T, np.dot(r_cov, w)))
             sim_res[:, i] = [p_r, p_v, (p_r - rf_rate) / p_v]
         
         tidx = np.argmax(sim_res[2])
-        best_weights = all_weights[tidx, :] # 修正 2: 同上
+        # 修正處 2：使用冒號 :
+        best_weights = all_weights[tidx, 🙂
         
         col1, col2 = st.columns([3, 2])
         with col1:
@@ -163,7 +168,7 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
             fig, ax = plt.subplots(figsize=(10, 6))
             sc = ax.scatter(sim_res[1], sim_res[0], c=sim_res[2], cmap='viridis', s=10, alpha=0.5)
             ax.scatter(sim_res[1, tidx], sim_res[0, tidx], color='red', marker='*', s=200, label='最佳夏普組合')
-            ax.set_xlabel("風險 (波動率)"); ax.set_ylabel("預期報酬")
+            ax.set_xlabel("風險"); ax.set_ylabel("報酬")
             plt.colorbar(sc, label='夏普比率')
             st.pyplot(fig)
 
@@ -179,7 +184,7 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
             st.dataframe(df_weights.style.format({'比例': '{:.2f}%'}))
 
     with tab6:
-        st.subheader("🔮 股價未來模擬 (GBM)")
+        st.subheader("🔮 股價未來模擬")
         tgt = st.selectbox("標的", returns.columns)
         
         s0 = df_prices[tgt].iloc[-1]
