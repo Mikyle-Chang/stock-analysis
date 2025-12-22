@@ -162,17 +162,17 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
         for i in range(num_simulations):
             w = np.random.random(len(returns.columns))
             w /= w.sum()
-            all_weights[i, 🙂 = w
+            all_weights[i, '🙂'] = w
             p_r = np.sum(w * r_mean)
             p_v = np.sqrt(np.dot(w.T, np.dot(r_cov, w)))
             sim_res[:, i] = [p_r, p_v, (p_r - rf_rate) / p_v]
         
         tidx = np.argmax(sim_res[2])
-        best_weights = all_weights[tidx, 🙂
+        best_weights = all_weights[tidx, '🙂']
         
         col1, col2 = st.columns([3, 2])
         with col1:
-            st.write("*效率前緣分佈圖*")
+            st.write("效率前緣分佈圖")
             fig, ax = plt.subplots(figsize=(10, 6))
             sc = ax.scatter(sim_res[1], sim_res[0], c=sim_res[2], cmap='viridis', s=10, alpha=0.5)
             ax.scatter(sim_res[1, tidx], sim_res[0, tidx], color='red', marker='*', s=200, label='最佳夏普組合')
@@ -181,7 +181,7 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
             st.pyplot(fig)
 
         with col2:
-            st.write("*最佳資產配置比例*")
+            st.write("最佳資產配置比例")
             df_weights = pd.DataFrame({'資產': returns.columns, '比例': best_weights * 100})
             df_weights = df_weights.sort_values(by='比例', ascending=False)
             
