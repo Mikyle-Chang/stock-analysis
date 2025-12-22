@@ -12,27 +12,36 @@ import requests
 # --- 1. 頁面設定 ---
 st.set_page_config(page_title="全球投資組合分析系統", layout="wide", page_icon="📈")
 
-# --- 🎯 自動下載字體解決方案 (免改環境) ---
+# --- 🎯 自動下載字體解決方案 (修正 FT2Font 報錯) ---
 def set_font():
-    font_filename = 'NotoSansTC-Regular.ttf'
-    # 如果本地沒有字體檔，直接從網路上下載
-    if not os.path.exists(font_filename):
-        with st.spinner('正在初始化系統字體，請稍候...'):
-            url = "https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTC/NotoSansCJKtc-Regular.ttc"
-            try:
-                response = requests.get(url)
-                with open(font_filename, 'wb') as f:
-                    f.write(response.content)
-            except:
-                st.sidebar.error("字體下載失敗，圖表中文可能無法顯示。")
-
-    if os.path.exists(font_filename):
-        # 加入字體到 Matplotlib
-        fm.fontManager.addfont(font_filename)
-        font_name = fm.FontProperties(fname=font_filename).get_name()
-        plt.rcParams['font.family'] = font_name
+    # 改用更標準的 .ttf 格式檔案
+    font_filename = 'SourceHanSansTC-Regular.ttf'
     
-    plt.rcParams['axes.unicode_minus'] = False # 解決負號亂碼
+    if not os.path.exists(font_filename):
+        with st.spinner('正在初始化系統字體 (僅需一次)，請稍候...'):
+            # 使用更穩定的單一字體檔連結 (GitHub 託管的開源字體)
+            url = "https://github.com/h-izumi/SourceHanSansTC-ttf/raw/master/Regular/SourceHanSansTC-Regular.ttf"
+            try:
+                response = requests.get(url, timeout=30)
+                if response.status_code == 200:
+                    with open(font_filename, 'wb') as f:
+                        f.write(response.content)
+                else:
+                    st.sidebar.error("字體下載失敗，狀態碼：" + str(response.status_code))
+            except Exception as e:
+                st.sidebar.error(f"下載過程出錯: {e}")
+
+    # 檢查檔案是否存在且大小正常 (避免空檔案報錯)
+    if os.path.exists(font_filename) and os.path.getsize(font_filename) > 1024:
+        try:
+            fm.fontManager.addfont(os.path.abspath(font_filename))
+            # 取得該字體檔的正確名稱並設定為全域字體
+            prop = fm.FontProperties(fname=font_filename)
+            plt.rcParams['font.family'] = prop.get_name()
+        except Exception as e:
+            st.sidebar.warning(f"字體載入失敗: {e}，改用預設字體")
+    
+    plt.rcParams['axes.unicode_minus'] = False 
 
 set_font()
 plt.style.use('bmh')
@@ -163,3 +172,4 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
                 sim_paths[t] = sim_paths[t-1] * np.exp((mu - 0.5 * sigma**2) * dt + sigma * np.sqrt(dt) * np.random.normal(0, 1, 50))
             st.write(f"預測年化報酬: {mu:.2%}, 年化波動: {sigma:.2%}")
             st.line_chart(sim_paths)
+
