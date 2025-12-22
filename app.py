@@ -5,61 +5,16 @@ import matplotlib.pyplot as plt
 from scipy import stats
 import yfinance as yf
 from datetime import datetime, timedelta
-import matplotlib.font_manager as fm
 import os
-import requests
 
 # --- 1. 頁面設定 ---
 st.set_page_config(page_title="全球投資組合分析系統", layout="wide", page_icon="📈")
 
-# --- 🎯 自動下載字體解決方案 (修正 404 連結失效問題) ---
-def set_font():
-    font_filename = 'SourceHanSansTC-Regular.ttf'
-    
-    # 如果檔案不存在，嘗試從多個備援載點下載
-    if not os.path.exists(font_filename):
-        with st.spinner('正在從備援伺服器初始化字體，請稍候...'):
-            # 備援 1: GitHub 上的特定分支
-            # 備援 2: 其他開源字體託管空間
-            urls = [
-                "https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf",
-                "https://github.com/h-izumi/SourceHanSansTC-ttf/raw/master/Regular/SourceHanSansTC-Regular.ttf"
-            ]
-            
-            success = False
-            for url in urls:
-                try:
-                    # 修正副檔名以匹配下載對象 (otf 或 ttf)
-                    ext = url.split('.')[-1]
-                    current_font = f"font.{ext}"
-                    
-                    response = requests.get(url, timeout=30)
-                    if response.status_code == 200:
-                        with open(current_font, 'wb') as f:
-                            f.write(response.content)
-                        font_filename = current_font
-                        success = True
-                        break
-                except:
-                    continue
-            
-            if not success:
-                st.sidebar.error("所有字體載點均失效。")
+# 不再處理中文字體，圖表內標籤統一改為英文以解決亂碼問題
+plt.style.use('bmh')
+plt.rcParams['axes.unicode_minus'] = False 
 
-    # 執行載入邏輯
-    if os.path.exists(font_filename) and os.path.getsize(font_filename) > 10000:
-        try:
-            fm.fontManager.addfont(os.path.abspath(font_filename))
-            prop = fm.FontProperties(fname=font_filename)
-            plt.rcParams['font.family'] = prop.get_name()
-            # 針對不同環境的最後設定
-            plt.rcParams['font.sans-serif'] = [prop.get_name()] + plt.rcParams['font.sans-serif']
-        except Exception as e:
-            st.sidebar.warning(f"字體載入出錯: {e}")
-    
-    plt.rcParams['axes.unicode_minus'] = False
-
-# --- 2. 核心計算函數 (以下完全不動您提供的邏輯) ---
+# --- 2. 核心計算函數 ---
 def calculate_mdd(series):
     cum_max = series.cummax()
     drawdown = (series - cum_max) / cum_max
@@ -81,7 +36,7 @@ def fetch_stock_data(tickers_tw, tickers_us, start, end):
         except: st.sidebar.warning(f"美股 {s} 失敗")
     return data_dict
 
-# --- 4. 側邊欄 ---
+# --- 4. 側邊欄 (介面維持中文) ---
 with st.sidebar:
     st.header('🎯 標的設定')
     tw_in = st.text_input('台股代號', '1215,1419,2430,2891,9918')
@@ -114,20 +69,33 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
         res_df['夏普比率'] = (res_df['年化報酬'] - rf_rate) / res_df['年化波動']
         res_df['最大回撤'] = [calculate_mdd(df_prices[c])[0] for c in df_prices.columns]
         st.dataframe(res_df.style.format("{:.2%}"), use_container_width=True)
+        
         cols = st.columns(2)
         for i, col in enumerate(returns.columns):
             with cols[i%2]:
                 fig, ax = plt.subplots(figsize=(6, 3))
                 ax.hist(returns[col], bins=40, density=True, alpha=0.7, color='steelblue')
-                ax.set_title(f"{col} 報酬率分佈")
+                # 圖表內部改英文
+                ax.set_title(f"Return Distribution: {col}")
+                ax.set_xlabel("Daily Return")
+                ax.set_ylabel("Frequency")
                 st.pyplot(fig)
 
     with tab2:
+        st.subheader("🔗 相關性矩陣")
         fig, ax = plt.subplots(figsize=(10, 8))
         im = ax.imshow(returns.corr(), cmap='RdBu_r', vmin=-1, vmax=1)
-        plt.colorbar(im); st.pyplot(fig)
+        plt.colorbar(im)
+        # 標籤使用代號 (Ticker)
+        ax.set_xticks(range(len(returns.columns)))
+        ax.set_xticklabels(returns.columns, rotation=45)
+        ax.set_yticks(range(len(returns.columns)))
+        ax.set_yticklabels(returns.columns)
+        st.pyplot(fig)
 
     with tab3:
+        st.subheader("💰 財富累積曲線")
+        # st.line_chart 本身就是英文介面，維持不動
         st.line_chart((1 + returns).cumprod() * initial_cap)
 
     with tab4:
@@ -164,10 +132,15 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
             with col1:
                 fig, ax = plt.subplots(figsize=(10, 6))
                 sc = ax.scatter(sim_res[1], sim_res[0], c=sim_res[2], cmap='viridis', s=10, alpha=0.5)
-                ax.scatter(sim_res[1, tidx], sim_res[0, tidx], color='red', marker='*', s=200, label='最佳夏普點')
+                # 圖表內部改英文
+                ax.scatter(sim_res[1, tidx], sim_res[0, tidx], color='red', marker='*', s=200, label='Max Sharpe')
                 cml_x = np.linspace(0, max(sim_res[1])*1.2, 100)
-                ax.plot(cml_x, rf_rate + sim_res[2, tidx] * cml_x, color='darkorange', linestyle='--', label='資本市場線')
-                ax.set_title("效率前緣分析 (台股組合)"); ax.legend(); st.pyplot(fig)
+                ax.plot(cml_x, rf_rate + sim_res[2, tidx] * cml_x, color='darkorange', linestyle='--', label='CML')
+                ax.set_title("Efficient Frontier (TW Stocks)")
+                ax.set_xlabel("Ann. Volatility")
+                ax.set_ylabel("Ann. Return")
+                ax.legend()
+                st.pyplot(fig)
             with col2:
                 df_w = pd.DataFrame({'資產': tw_assets, '比例': best_weights_final * 100})
                 st.dataframe(df_w.sort_values(by='比例', ascending=False).style.format({'比例': '{:.2f}%'}))
@@ -183,7 +156,7 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
             sim_paths[0] = s0
             for t in range(1, forecast_len):
                 sim_paths[t] = sim_paths[t-1] * np.exp((mu - 0.5 * sigma**2) * dt + sigma * np.sqrt(dt) * np.random.normal(0, 1, 50))
+            # 外部說明維持中文
             st.write(f"預測年化報酬: {mu:.2%}, 年化波動: {sigma:.2%}")
+            # st.line_chart 預設為英文標籤
             st.line_chart(sim_paths)
-
-
