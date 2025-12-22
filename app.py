@@ -55,8 +55,8 @@ def fetch_stock_data(tickers_tw, tickers_us, start, end):
 # --- 4. 側邊欄 ---
 with st.sidebar:
     st.header('🎯 標的設定')
-    tw_in = st.text_input('台股代號', '2330, 2454, 2317')
-    us_in = st.text_input('美股代號', 'VOO, QQQ, TSLA')
+    tw_in = st.text_input('台股代號', '1215,1419,2430,2891,9918')
+    us_in = st.text_input('美股代號', 'DBC,GLD,SPY,VCIT,VNQ,VTV,VUG')
     
     st.header('📅 時間與資金')
     start_date = st.date_input('開始日期', datetime.now() - timedelta(days=365*3))
@@ -154,5 +154,6 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
         dt = 1/252
         sim_paths = pd.DataFrame([s0 * np.exp(np.cumsum((mu - 0.5 * sigma**2) * dt + sigma * np.sqrt(dt) * np.random.normal(0, 1, forecast_len))) for _ in range(50)]).T
         st.line_chart(sim_paths)
+
 
 
