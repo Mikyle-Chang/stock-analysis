@@ -7,32 +7,37 @@ import yfinance as yf
 from datetime import datetime, timedelta
 import matplotlib.font_manager as fm
 import os
+import requests
 
 # --- 1. 頁面設定 ---
 st.set_page_config(page_title="全球投資組合分析系統", layout="wide", page_icon="📈")
 
-# --- 🎯 雲端通用字體解決方案 ---
+# --- 🎯 自動下載字體解決方案 (免改環境) ---
 def set_font():
-    # 下載或指定專案資料夾內的字體檔
-    font_path = 'NotoSansTC-Regular.ttf' 
-    if os.path.exists(font_path):
-        # 載入字體並設定為 Matplotlib 預設
-        font_prop = fm.FontProperties(fname=font_path)
-        plt.rcParams['font.family'] = font_prop.get_name()
-        # 加入這行確保 Matplotlib 註冊了該字體
-        fm.fontManager.addfont(font_path)
-    else:
-        # 如果沒檔案，嘗試最後的掙扎（針對 Linux 環境）
-        plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
-        st.sidebar.warning("找不到 NotoSansTC-Regular.ttf，中文字體可能無法顯示")
+    font_filename = 'NotoSansTC-Regular.ttf'
+    # 如果本地沒有字體檔，直接從網路上下載
+    if not os.path.exists(font_filename):
+        with st.spinner('正在初始化系統字體，請稍候...'):
+            url = "https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTC/NotoSansCJKtc-Regular.ttc"
+            try:
+                response = requests.get(url)
+                with open(font_filename, 'wb') as f:
+                    f.write(response.content)
+            except:
+                st.sidebar.error("字體下載失敗，圖表中文可能無法顯示。")
+
+    if os.path.exists(font_filename):
+        # 加入字體到 Matplotlib
+        fm.fontManager.addfont(font_filename)
+        font_name = fm.FontProperties(fname=font_filename).get_name()
+        plt.rcParams['font.family'] = font_name
     
-    plt.rcParams['axes.unicode_minus'] = False 
+    plt.rcParams['axes.unicode_minus'] = False # 解決負號亂碼
 
 set_font()
 plt.style.use('bmh')
 
-# --- 剩下程式碼保持完全不動 (2. 核心計算函數以後...) ---
-# --- 2. 核心計算函數 ---
+# --- 2. 核心計算函數 (以下完全不動您提供的邏輯) ---
 def calculate_mdd(series):
     cum_max = series.cummax()
     drawdown = (series - cum_max) / cum_max
@@ -158,4 +163,3 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
                 sim_paths[t] = sim_paths[t-1] * np.exp((mu - 0.5 * sigma**2) * dt + sigma * np.sqrt(dt) * np.random.normal(0, 1, 50))
             st.write(f"預測年化報酬: {mu:.2%}, 年化波動: {sigma:.2%}")
             st.line_chart(sim_paths)
-
