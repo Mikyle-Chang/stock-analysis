@@ -10,7 +10,7 @@ import os
 # --- 1. 頁面設定 ---
 st.set_page_config(page_title="全球投資組合分析系統", layout="wide", page_icon="📈")
 
-# 不再處理中文字體，圖表內標籤統一改為英文以解決亂碼問題
+# 解決亂碼問題：圖表內部改用英文字體
 plt.style.use('bmh')
 plt.rcParams['axes.unicode_minus'] = False 
 
@@ -24,7 +24,9 @@ def calculate_mdd(series):
 @st.cache_data(ttl=3600)
 def fetch_stock_data(tickers_tw, tickers_us, start, end):
     data_dict = {}
-    for s in list(set(tickers_tw + ['0050'])):
+    unique_tw = list(set(tickers_tw + ['0050']))
+    unique_us = list(set(tickers_us + ['SPY']))
+    for s in unique_tw:
         try:
             df = yf.Ticker(f"{s}.TW").history(start=start, end=end, auto_adjust=True)
             if not df.empty: data_dict[s] = df['Close']
@@ -36,7 +38,7 @@ def fetch_stock_data(tickers_tw, tickers_us, start, end):
         except: st.sidebar.warning(f"美股 {s} 失敗")
     return data_dict
 
-# --- 4. 側邊欄 (介面維持中文) ---
+# --- 4. 側邊欄 (中文介面) ---
 with st.sidebar:
     st.header('🎯 標的設定')
     tw_in = st.text_input('台股代號', '1215,1419,2430,2891,9918')
@@ -53,7 +55,7 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
     tw_list = [x.strip() for x in tw_in.split(',') if x.strip()]
     us_list = [x.strip().upper() for x in us_in.split(',') if x.strip()]
     
-    with st.spinner('抓取數據中...'):
+    with st.spinner('數據計算中...'):
         raw_data = fetch_stock_data(tw_list, us_list, start_date, end_date)
         if not raw_data: st.stop()
         df_prices = pd.DataFrame(raw_data).ffill().dropna()
@@ -75,7 +77,6 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
             with cols[i%2]:
                 fig, ax = plt.subplots(figsize=(6, 3))
                 ax.hist(returns[col], bins=40, density=True, alpha=0.7, color='steelblue')
-                # 圖表內部改英文
                 ax.set_title(f"Return Distribution: {col}")
                 ax.set_xlabel("Daily Return")
                 ax.set_ylabel("Frequency")
@@ -86,16 +87,12 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
         fig, ax = plt.subplots(figsize=(10, 8))
         im = ax.imshow(returns.corr(), cmap='RdBu_r', vmin=-1, vmax=1)
         plt.colorbar(im)
-        # 標籤使用代號 (Ticker)
-        ax.set_xticks(range(len(returns.columns)))
-        ax.set_xticklabels(returns.columns, rotation=45)
-        ax.set_yticks(range(len(returns.columns)))
-        ax.set_yticklabels(returns.columns)
+        ax.set_xticks(range(len(returns.columns))); ax.set_xticklabels(returns.columns, rotation=45)
+        ax.set_yticks(range(len(returns.columns))); ax.set_yticklabels(returns.columns)
         st.pyplot(fig)
 
     with tab3:
         st.subheader("💰 財富累積曲線")
-        # st.line_chart 本身就是英文介面，維持不動
         st.line_chart((1 + returns).cumprod() * initial_cap)
 
     with tab4:
@@ -126,25 +123,35 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
                 p_r = np.sum(w * r_mean)
                 p_v = np.sqrt(np.dot(w.T, np.dot(r_cov, w)))
                 sim_res[:, i] = [p_r, p_v, (p_r - rf_rate) / p_v]
+            
             tidx = np.argmax(sim_res[2])
             best_weights_final = all_weights[tidx, :]
+            
             col1, col2 = st.columns([3, 2])
             with col1:
                 fig, ax = plt.subplots(figsize=(10, 6))
                 sc = ax.scatter(sim_res[1], sim_res[0], c=sim_res[2], cmap='viridis', s=10, alpha=0.5)
-                # 圖表內部改英文
                 ax.scatter(sim_res[1, tidx], sim_res[0, tidx], color='red', marker='*', s=200, label='Max Sharpe')
                 cml_x = np.linspace(0, max(sim_res[1])*1.2, 100)
                 ax.plot(cml_x, rf_rate + sim_res[2, tidx] * cml_x, color='darkorange', linestyle='--', label='CML')
-                ax.set_title("Efficient Frontier (TW Stocks)")
-                ax.set_xlabel("Ann. Volatility")
-                ax.set_ylabel("Ann. Return")
-                ax.legend()
-                st.pyplot(fig)
+                ax.set_title("Efficient Frontier (TW Assets)")
+                ax.set_xlabel("Ann. Volatility"); ax.set_ylabel("Ann. Return")
+                ax.legend(); st.pyplot(fig)
+            
             with col2:
-                df_w = pd.DataFrame({'資產': tw_assets, '比例': best_weights_final * 100})
-                st.dataframe(df_w.sort_values(by='比例', ascending=False).style.format({'比例': '{:.2f}%'}))
-        else: st.warning("台股數量不足。")
+                # 重新加入圓餅圖功能
+                st.write("**資產配置比例圖**")
+                df_w = pd.DataFrame({'Asset': tw_assets, 'Weight': best_weights_final * 100})
+                df_w = df_w.sort_values(by='Weight', ascending=False)
+                
+                fig_pie, ax_pie = plt.subplots()
+                ax_pie.pie(df_w['Weight'], labels=df_w['Asset'], autopct='%1.1f%%', startangle=140)
+                ax_pie.set_title("Optimal Portfolio Allocation")
+                st.pyplot(fig_pie)
+                
+                st.dataframe(df_w.style.format({'Weight': '{:.2f}%'}))
+        else:
+            st.warning("台股數量不足。")
 
     with tab6:
         st.subheader("🔮 最佳組合未來財富模擬")
@@ -156,7 +163,5 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
             sim_paths[0] = s0
             for t in range(1, forecast_len):
                 sim_paths[t] = sim_paths[t-1] * np.exp((mu - 0.5 * sigma**2) * dt + sigma * np.sqrt(dt) * np.random.normal(0, 1, 50))
-            # 外部說明維持中文
             st.write(f"預測年化報酬: {mu:.2%}, 年化波動: {sigma:.2%}")
-            # st.line_chart 預設為英文標籤
             st.line_chart(sim_paths)
