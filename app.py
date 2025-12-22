@@ -12,39 +12,52 @@ import requests
 # --- 1. 頁面設定 ---
 st.set_page_config(page_title="全球投資組合分析系統", layout="wide", page_icon="📈")
 
-# --- 🎯 自動下載字體解決方案 (修正 FT2Font 報錯) ---
+# --- 🎯 自動下載字體解決方案 (修正 404 連結失效問題) ---
 def set_font():
-    # 改用更標準的 .ttf 格式檔案
     font_filename = 'SourceHanSansTC-Regular.ttf'
     
+    # 如果檔案不存在，嘗試從多個備援載點下載
     if not os.path.exists(font_filename):
-        with st.spinner('正在初始化系統字體 (僅需一次)，請稍候...'):
-            # 使用更穩定的單一字體檔連結 (GitHub 託管的開源字體)
-            url = "https://github.com/h-izumi/SourceHanSansTC-ttf/raw/master/Regular/SourceHanSansTC-Regular.ttf"
-            try:
-                response = requests.get(url, timeout=30)
-                if response.status_code == 200:
-                    with open(font_filename, 'wb') as f:
-                        f.write(response.content)
-                else:
-                    st.sidebar.error("字體下載失敗，狀態碼：" + str(response.status_code))
-            except Exception as e:
-                st.sidebar.error(f"下載過程出錯: {e}")
+        with st.spinner('正在從備援伺服器初始化字體，請稍候...'):
+            # 備援 1: GitHub 上的特定分支
+            # 備援 2: 其他開源字體託管空間
+            urls = [
+                "https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf",
+                "https://github.com/h-izumi/SourceHanSansTC-ttf/raw/master/Regular/SourceHanSansTC-Regular.ttf"
+            ]
+            
+            success = False
+            for url in urls:
+                try:
+                    # 修正副檔名以匹配下載對象 (otf 或 ttf)
+                    ext = url.split('.')[-1]
+                    current_font = f"font.{ext}"
+                    
+                    response = requests.get(url, timeout=30)
+                    if response.status_code == 200:
+                        with open(current_font, 'wb') as f:
+                            f.write(response.content)
+                        font_filename = current_font
+                        success = True
+                        break
+                except:
+                    continue
+            
+            if not success:
+                st.sidebar.error("所有字體載點均失效。")
 
-    # 檢查檔案是否存在且大小正常 (避免空檔案報錯)
-    if os.path.exists(font_filename) and os.path.getsize(font_filename) > 1024:
+    # 執行載入邏輯
+    if os.path.exists(font_filename) and os.path.getsize(font_filename) > 10000:
         try:
             fm.fontManager.addfont(os.path.abspath(font_filename))
-            # 取得該字體檔的正確名稱並設定為全域字體
             prop = fm.FontProperties(fname=font_filename)
             plt.rcParams['font.family'] = prop.get_name()
+            # 針對不同環境的最後設定
+            plt.rcParams['font.sans-serif'] = [prop.get_name()] + plt.rcParams['font.sans-serif']
         except Exception as e:
-            st.sidebar.warning(f"字體載入失敗: {e}，改用預設字體")
+            st.sidebar.warning(f"字體載入出錯: {e}")
     
-    plt.rcParams['axes.unicode_minus'] = False 
-
-set_font()
-plt.style.use('bmh')
+    plt.rcParams['axes.unicode_minus'] = False
 
 # --- 2. 核心計算函數 (以下完全不動您提供的邏輯) ---
 def calculate_mdd(series):
@@ -172,4 +185,5 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
                 sim_paths[t] = sim_paths[t-1] * np.exp((mu - 0.5 * sigma**2) * dt + sigma * np.sqrt(dt) * np.random.normal(0, 1, 50))
             st.write(f"預測年化報酬: {mu:.2%}, 年化波動: {sigma:.2%}")
             st.line_chart(sim_paths)
+
 
