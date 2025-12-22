@@ -95,7 +95,7 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
         st.subheader("📋 統計特徵 (已修正分割誤差)")
         res_df = pd.DataFrame(index=returns.columns)
         res_df['年化報酬'] = returns.mean() * 365
-        res_df['年化波動'] = returns.std() * np.sqrt(3653
+        res_df['年化波動'] = returns.std() * np.sqrt(365)
         res_df['夏普比率'] = (res_df['年化報酬'] - rf_rate) / res_df['年化波動']
         res_df['最大回撤'] = [calculate_mdd(df_prices[c])[0] for c in df_prices.columns]
         
@@ -154,4 +154,5 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
         dt = 1/252
         sim_paths = pd.DataFrame([s0 * np.exp(np.cumsum((mu - 0.5 * sigma**2) * dt + sigma * np.sqrt(dt) * np.random.normal(0, 1, forecast_len))) for _ in range(50)]).T
         st.line_chart(sim_paths)
+
 
