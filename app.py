@@ -133,19 +133,59 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
             beta_data.append({"Asset": s, "Beta": slope, "R2": r_val**2})
         st.table(pd.DataFrame(beta_data))
 
+    # --- Tab 5: 效率前緣 (新增最佳權重顯示) ---
     with tab5:
-        st.subheader("⚖️ 效率前緣")
-        r_mean, r_cov = returns.mean()*252, returns.cov()*252
-        p_res = np.zeros((3, sim_count))
-        for i in range(sim_count):
-            w = np.random.random(len(returns.columns)); w /= w.sum()
-            p_r = np.sum(w * r_mean); p_v = np.sqrt(np.dot(w.T, np.dot(r_cov, w)))
-            p_res[:, i] = [p_r, p_v, (p_r - rf_rate) / p_v]
+        st.subheader("⚖️ 最佳投資組合配置")
         
-        fig, ax = plt.subplots()
-        ax.scatter(p_res[1], p_res[0], c=p_res[2], cmap='viridis', s=5)
-        ax.set_xlabel("風險"); ax.set_ylabel("報酬")
-        st.pyplot(fig)
+        # 1. 準備數據
+        r_mean = returns.mean() * 252
+        r_cov = returns.cov() * 252
+        
+        # 2. 模擬並記錄權重
+        sim_res = np.zeros((3, num_simulations))
+        all_weights = np.zeros((num_simulations, len(returns.columns))) # 新增：存放所有模擬的權重
+        
+        for i in range(num_simulations):
+            w = np.random.random(len(returns.columns))
+            w /= w.sum()
+            all_weights[i, :] = w # 記錄這組權重
+            
+            p_r = np.sum(w * r_mean)
+            p_v = np.sqrt(np.dot(w.T, np.dot(r_cov, w)))
+            sim_res[:, i] = [p_r, p_v, (p_r - rf) / p_v]
+        
+        # 3. 找出最佳索引 (Max Sharpe Ratio)
+        tidx = np.argmax(sim_res[2])
+        best_weights = all_weights[tidx, :] # 取得最優組合的權重
+        
+        # --- 視覺化呈現 ---
+        col1, col2 = st.columns([3, 2])
+        
+        with col1:
+            st.write("**效率前緣分佈圖**")
+            fig, ax = plt.subplots(figsize=(10, 6))
+            sc = ax.scatter(sim_res[1], sim_res[0], c=sim_res[2], cmap='viridis', s=10, alpha=0.5)
+            ax.scatter(sim_res[1, tidx], sim_res[0, tidx], color='red', marker='*', s=200, label='最佳夏普組合')
+            ax.set_xlabel("年化波動率 (風險)"); ax.set_ylabel("年化預期報酬")
+            plt.colorbar(sc, label='夏普比率')
+            st.pyplot(fig)
+    
+        with col2:
+            st.write("**最佳資產配置比例**")
+            # 建立權重表格
+            df_weights = pd.DataFrame({
+                '資產': returns.columns,
+                '配置比例 (%)': best_weights * 100
+            }).sort_values(by='配置比例 (%)', ascending=False)
+            
+            # 繪製圓餅圖
+            fig_pie, ax_pie = plt.subplots()
+            ax_pie.pie(df_weights['配置比例 (%)'], labels=df_weights['資產'], 
+                       autopct='%1.1f%%', startangle=140, colors=plt.cm.Paired.colors)
+            ax_pie.axis('equal')  # 確保圓餅圖是圓的
+            st.pyplot(fig_pie)
+            
+            st.dataframe(df_weights.style.format({'配置比例 (%)': '{:.2f}%'}), use_container_width=True)
 
     with tab6:
         st.subheader("🔮 股價未來模擬")
@@ -154,6 +194,7 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
         dt = 1/252
         sim_paths = pd.DataFrame([s0 * np.exp(np.cumsum((mu - 0.5 * sigma**2) * dt + sigma * np.sqrt(dt) * np.random.normal(0, 1, forecast_len))) for _ in range(50)]).T
         st.line_chart(sim_paths)
+
 
 
 
