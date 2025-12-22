@@ -16,7 +16,7 @@ plt.rcParams['axes.unicode_minus'] = False
 
 # --- 2. 核心計算函數 ---
 def calculate_mdd(series):
-    """計算最大回撤"""
+    """計算最大回徹"""
     cum_max = series.cummax()
     drawdown = (series - cum_max) / cum_max
     return drawdown.min(), drawdown
@@ -66,18 +66,12 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
     tw_list = [x.strip() for x in tw_in.split(',') if x.strip()]
     us_list = [x.strip().upper() for x in us_in.split(',') if x.strip()]
     
-    with st.spinner('正在從 Yahoo Finance 節點抓取全球複權數據...'):
+    with st.spinner('正在抓取數據...'):
         raw_data = fetch_stock_data(tw_list, us_list, start_date, end_date)
-        
         if not raw_data:
-            st.error("❌ 所有來源均連線失敗。請嘗試更換日期範圍或稍後再試。")
             st.stop()
-            
         df_prices = pd.DataFrame(raw_data).ffill().dropna()
-        returns = df_prices.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
-
-    st.success(f"✅ 成功載入 {len(df_prices.columns)} 檔資產數據！")
-    st.download_button("📥 下載調整後數據 (CSV)", df_prices.to_csv().encode('utf-8'), "data.csv")
+        returns = df_prices.pct_change().dropna()
 
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 統計", "🔗 相關性", "💰 模擬", "📐 市場模型", "⚖️ 效率前緣", "🔮 預測"])
 
@@ -90,7 +84,6 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
         res_df['最大回撤'] = [calculate_mdd(df_prices[c])[0] for c in df_prices.columns]
         st.dataframe(res_df.style.format("{:.2%}"), use_container_width=True)
         
-        # 這裡還原您原始要求的圖表區塊
         cols = st.columns(2)
         for i, col in enumerate(returns.columns):
             with cols[i%2]:
@@ -100,17 +93,11 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
                 st.pyplot(fig)
 
     with tab2:
-        st.subheader("🔗 相關性矩陣")
         fig, ax = plt.subplots(figsize=(10, 8))
-        corr = returns.corr()
-        im = ax.imshow(corr, cmap='RdBu_r', vmin=-1, vmax=1)
-        plt.colorbar(im)
-        ax.set_xticks(range(len(corr.columns))); ax.set_xticklabels(corr.columns, rotation=45)
-        ax.set_yticks(range(len(corr.columns))); ax.set_yticklabels(corr.columns)
-        st.pyplot(fig)
+        im = ax.imshow(returns.corr(), cmap='RdBu_r', vmin=-1, vmax=1)
+        plt.colorbar(im); st.pyplot(fig)
 
     with tab3:
-        st.subheader("💰 財富累積曲線")
         st.line_chart((1 + returns).cumprod() * initial_cap)
 
     with tab4:
@@ -125,63 +112,59 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
                 beta_data.append({"Asset": s, "Benchmark": mkt, "Beta": slope, "R2": r_val**2})
         st.table(pd.DataFrame(beta_data))
 
+    # --- 效率前緣計算 (僅台股) ---
+    tw_assets = [s for s in returns.columns if s in tw_list or s == '0050']
+    best_weights_final = None
+    
     with tab5:
         st.subheader("⚖️ 最佳投資組合配置 (僅台股)")
-        tw_assets = [s for s in returns.columns if s in tw_list or s == '0050']
         if len(tw_assets) >= 2:
             tw_returns = returns[tw_assets]
             r_mean = tw_returns.mean() * 252
             r_cov = tw_returns.cov() * 252
-            
             sim_res = np.zeros((3, num_simulations))
             all_weights = np.zeros((num_simulations, len(tw_assets)))
-            
             for i in range(num_simulations):
                 w = np.random.random(len(tw_assets))
-                w /= w.sum()
-                all_weights[i, :] = w
+                w /= w.sum(); all_weights[i, :] = w
                 p_r = np.sum(w * r_mean)
                 p_v = np.sqrt(np.dot(w.T, np.dot(r_cov, w)))
                 sim_res[:, i] = [p_r, p_v, (p_r - rf_rate) / p_v]
             
-            tidx = np.argmax(sim_res[2]) # Max Sharpe
-            mvp_idx = np.argmin(sim_res[1]) # Min Vol
+            tidx = np.argmax(sim_res[2])
+            best_weights_final = all_weights[tidx, :]
             
             col1, col2 = st.columns([3, 2])
             with col1:
-                st.write(f"**效率前緣分佈圖 (最佳夏普值: {sim_res[2, tidx]:.4f})**")
                 fig, ax = plt.subplots(figsize=(10, 6))
                 sc = ax.scatter(sim_res[1], sim_res[0], c=sim_res[2], cmap='viridis', s=10, alpha=0.5)
                 ax.scatter(sim_res[1, tidx], sim_res[0, tidx], color='red', marker='*', s=200, label='最佳夏普點')
-                ax.scatter(sim_res[1, mvp_idx], sim_res[0, mvp_idx], color='blue', marker='X', s=150, label='最小變異點')
-                
-                # CML 線
                 cml_x = np.linspace(0, max(sim_res[1])*1.2, 100)
-                cml_y = rf_rate + sim_res[2, tidx] * cml_x
-                ax.plot(cml_x, cml_y, color='darkorange', linestyle='--', label='資本市場線')
-                
-                ax.set_xlabel("風險"); ax.set_ylabel("報酬"); ax.set_xlim(left=0)
-                plt.colorbar(sc, label='夏普比率'); ax.legend(); st.pyplot(fig)
-
+                ax.plot(cml_x, rf_rate + sim_res[2, tidx] * cml_x, color='darkorange', linestyle='--', label='資本市場線')
+                ax.legend(); st.pyplot(fig)
             with col2:
-                st.write("**最佳資產配置比例**")
-                df_weights = pd.DataFrame({'資產': tw_assets, '比例': all_weights[tidx, :] * 100})
-                df_weights = df_weights.sort_values(by='比例', ascending=False)
-                fig_pie, ax_pie = plt.subplots()
-                ax_pie.pie(df_weights['比例'], labels=df_weights['資產'], autopct='%1.1f%%', startangle=140)
-                ax_pie.axis('equal')
-                st.pyplot(fig_pie)
-                st.dataframe(df_weights.style.format({'比例': '{:.2f}%'}))
+                df_weights = pd.DataFrame({'資產': tw_assets, '比例': best_weights_final * 100})
+                st.dataframe(df_weights.sort_values(by='比例', ascending=False).style.format({'比例': '{:.2f}%'}))
         else:
-            st.warning("台股數量不足，無法計算效率前緣。")
+            st.warning("台股數量不足。")
 
     with tab6:
-        st.subheader("🔮 股價未來模擬")
-        tgt = st.selectbox("標的", returns.columns)
-        s0, mu, sigma = df_prices[tgt].iloc[-1], returns[tgt].mean()*252, returns[tgt].std()*np.sqrt(252)
-        dt = 1/252
-        sim_paths = np.zeros((forecast_len, 50))
-        sim_paths[0] = s0
-        for t in range(1, forecast_len):
-            sim_paths[t] = sim_paths[t-1] * np.exp((mu - 0.5 * sigma**2) * dt + sigma * np.sqrt(dt) * np.random.normal(0, 1, 50))
-        st.line_chart(sim_paths)
+        st.subheader("🔮 最佳組合未來財富模擬")
+        if best_weights_final is not None:
+            # 計算最佳組合的每日報酬率序列
+            portfolio_daily_returns = (returns[tw_assets] * best_weights_final).sum(axis=1)
+            
+            mu = portfolio_daily_returns.mean() * 252
+            sigma = portfolio_daily_returns.std() * np.sqrt(252)
+            s0 = initial_cap
+            dt = 1/252
+            
+            sim_paths = np.zeros((forecast_len, 50))
+            sim_paths[0] = s0
+            for t in range(1, forecast_len):
+                sim_paths[t] = sim_paths[t-1] * np.exp((mu - 0.5 * sigma**2) * dt + sigma * np.sqrt(dt) * np.random.normal(0, 1, 50))
+            
+            st.write(f"基於最佳夏普組合的預測 (年化報酬: {mu:.2%}, 年化波動: {sigma:.2%})")
+            st.line_chart(sim_paths)
+        else:
+            st.info("請先確保台股數據足以計算最佳組合。")
