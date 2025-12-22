@@ -6,24 +6,32 @@ from scipy import stats
 import yfinance as yf
 from datetime import datetime, timedelta
 import matplotlib.font_manager as fm
+import os
 
 # --- 1. 頁面設定 ---
 st.set_page_config(page_title="全球投資組合分析系統", layout="wide", page_icon="📈")
 
-# --- 解決中文字體正方形亂碼問題 ---
-def set_chinese_font():
-    # 尋找系統內可用的中文字體
-    potential_fonts = ['Microsoft JhengHei', 'Arial Unicode MS', 'SimHei', 'PingFang TC', 'STHeiti']
-    valid_fonts = [f.name for f in fm.fontManager.ttflist]
-    for font in potential_fonts:
-        if font in valid_fonts:
-            plt.rcParams['font.sans-serif'] = [font]
-            break
-    plt.rcParams['axes.unicode_minus'] = False # 解決負號顯示為方塊的問題
+# --- 🎯 雲端通用字體解決方案 ---
+def set_font():
+    # 下載或指定專案資料夾內的字體檔
+    font_path = 'NotoSansTC-Regular.ttf' 
+    if os.path.exists(font_path):
+        # 載入字體並設定為 Matplotlib 預設
+        font_prop = fm.FontProperties(fname=font_path)
+        plt.rcParams['font.family'] = font_prop.get_name()
+        # 加入這行確保 Matplotlib 註冊了該字體
+        fm.fontManager.addfont(font_path)
+    else:
+        # 如果沒檔案，嘗試最後的掙扎（針對 Linux 環境）
+        plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
+        st.sidebar.warning("找不到 NotoSansTC-Regular.ttf，中文字體可能無法顯示")
+    
+    plt.rcParams['axes.unicode_minus'] = False 
 
-set_chinese_font()
+set_font()
 plt.style.use('bmh')
 
+# --- 剩下程式碼保持完全不動 (2. 核心計算函數以後...) ---
 # --- 2. 核心計算函數 ---
 def calculate_mdd(series):
     cum_max = series.cummax()
@@ -150,3 +158,4 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
                 sim_paths[t] = sim_paths[t-1] * np.exp((mu - 0.5 * sigma**2) * dt + sigma * np.sqrt(dt) * np.random.normal(0, 1, 50))
             st.write(f"預測年化報酬: {mu:.2%}, 年化波動: {sigma:.2%}")
             st.line_chart(sim_paths)
+
