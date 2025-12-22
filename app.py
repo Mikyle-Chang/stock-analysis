@@ -95,7 +95,13 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
     with tab1:
         st.subheader("📋 統計特徵")
         res_df = pd.DataFrame(index=returns.columns)
-        res_df['年化報酬'] = returns.mean() * 252
+        # 1. 先算出總天數與總報酬倍數
+        total_days = (df_prices.index[-1] - df_prices.index[0]).days
+        years = total_days / 365.25
+        
+        # 2. 用「期末除以期初」開根號的方式計算幾何年化報酬 (CAGR)
+        # 這種算法才能反映 0050 真正的資產翻倍實力
+        res_df['年化報酬'] = (df_prices.iloc[-1] / df_prices.iloc[0]) ** (1 / years) - 1
         res_df['年化波動'] = returns.std() * np.sqrt(252)
         res_df['夏普比率'] = (res_df['年化報酬'] - rf_rate) / res_df['年化波動']
         res_df['最大回撤'] = [calculate_mdd(df_prices[c])[0] for c in df_prices.columns]
@@ -207,3 +213,4 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
             sim_paths[t] = sim_paths[t-1] * np.exp(drift + shock * z)
             
         st.line_chart(sim_paths)
+
