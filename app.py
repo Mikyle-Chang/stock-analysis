@@ -31,14 +31,14 @@ def fetch_stock_data(tickers_tw, tickers_us, start, end):
             df = yf.Ticker(f"{s}.TW").history(start=start, end=end, auto_adjust=True)
             if not df.empty: data_dict[s] = df['Close']
         except: st.sidebar.warning(f"台股 {s} 失敗")
-    for s in list(set(tickers_us + ['SPY'])):
+    for s in unique_us:
         try:
             df = yf.Ticker(s).history(start=start, end=end, auto_adjust=True)
             if not df.empty: data_dict[s] = df['Close']
         except: st.sidebar.warning(f"美股 {s} 失敗")
     return data_dict
 
-# --- 4. 側邊欄 (中文介面) ---
+# --- 4. 側邊欄 ---
 with st.sidebar:
     st.header('🎯 標的設定')
     tw_in = st.text_input('台股代號', '1215,1419,2430,2891,9918')
@@ -78,8 +78,7 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
                 fig, ax = plt.subplots(figsize=(6, 3))
                 ax.hist(returns[col], bins=40, density=True, alpha=0.7, color='steelblue')
                 ax.set_title(f"Return Distribution: {col}")
-                ax.set_xlabel("Daily Return")
-                ax.set_ylabel("Frequency")
+                ax.set_xlabel("Daily Return"); ax.set_ylabel("Frequency")
                 st.pyplot(fig)
 
     with tab2:
@@ -124,32 +123,32 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
                 p_v = np.sqrt(np.dot(w.T, np.dot(r_cov, w)))
                 sim_res[:, i] = [p_r, p_v, (p_r - rf_rate) / p_v]
             
-            tidx = np.argmax(sim_res[2])
+            tidx = np.argmax(sim_res[2]) # 最佳夏普
+            mvp_idx = np.argmin(sim_res[1]) # 最小波動
             best_weights_final = all_weights[tidx, :]
             
             col1, col2 = st.columns([3, 2])
             with col1:
                 fig, ax = plt.subplots(figsize=(10, 6))
                 sc = ax.scatter(sim_res[1], sim_res[0], c=sim_res[2], cmap='viridis', s=10, alpha=0.5)
+                # 同時畫出兩個點
                 ax.scatter(sim_res[1, tidx], sim_res[0, tidx], color='red', marker='*', s=200, label='Max Sharpe')
+                ax.scatter(sim_res[1, mvp_idx], sim_res[0, mvp_idx], color='blue', marker='X', s=150, label='Min Volatility')
+                # 資本市場線
                 cml_x = np.linspace(0, max(sim_res[1])*1.2, 100)
                 ax.plot(cml_x, rf_rate + sim_res[2, tidx] * cml_x, color='darkorange', linestyle='--', label='CML')
-                ax.set_title("Efficient Frontier (TW Assets)")
+                ax.set_title("Efficient Frontier (TW Stocks)")
                 ax.set_xlabel("Ann. Volatility"); ax.set_ylabel("Ann. Return")
                 ax.legend(); st.pyplot(fig)
             
             with col2:
-                # 重新加入圓餅圖功能
                 st.write("**資產配置比例圖**")
                 df_w = pd.DataFrame({'Asset': tw_assets, 'Weight': best_weights_final * 100})
-                df_w = df_w.sort_values(by='Weight', ascending=False)
-                
                 fig_pie, ax_pie = plt.subplots()
                 ax_pie.pie(df_w['Weight'], labels=df_w['Asset'], autopct='%1.1f%%', startangle=140)
-                ax_pie.set_title("Optimal Portfolio Allocation")
+                ax_pie.set_title("Optimal Allocation")
                 st.pyplot(fig_pie)
-                
-                st.dataframe(df_w.style.format({'Weight': '{:.2f}%'}))
+                st.dataframe(df_w.sort_values(by='Weight', ascending=False).style.format({'Weight': '{:.2f}%'}))
         else:
             st.warning("台股數量不足。")
 
