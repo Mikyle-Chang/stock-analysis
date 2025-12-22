@@ -6,168 +6,151 @@ from scipy import stats
 from FinMind.data import DataLoader
 import yfinance as yf
 from datetime import datetime, timedelta
-import requests
 
 # --- 1. 頁面設定 ---
-st.set_page_config(page_title="全球投資組合優化系統", layout="wide", page_icon="📈")
+st.set_page_config(page_title="全球投資組合分析系統", layout="wide", page_icon="📈")
 
+# 設定中文字體
 plt.style.use('bmh')
-plt.rcParams['font.sans-serif'] = ['Microsoft JhengHei', 'Taipei Sans TC', 'Arial', 'sans-serif']
+plt.rcParams['font.sans-serif'] = ['Microsoft JhengHei', 'Arial']
 plt.rcParams['axes.unicode_minus'] = False
 
-# --- 2. 核心工具函數 ---
+# --- 2. 核心計算函數 ---
 def calculate_mdd(series):
     """計算最大回撤"""
     cum_max = series.cummax()
     drawdown = (series - cum_max) / cum_max
     return drawdown.min(), drawdown
 
-# --- 3. 側邊欄設定 ---
-with st.sidebar:
-    st.header('1. 🎯 投資標的')
-    tw_input = st.text_input('台股代號', '2330, 2454, 2317')
-    us_input = st.text_input('美股代號', 'VOO, QQQ, AAPL')
+# --- 3. 強化型數據抓取函數 (帶快取與偽裝) ---
+@st.cache_data(ttl=3600)  # 快取一小時，減少請求次數
+def fetch_stock_data(tickers_tw, tickers_us, start, end):
+    data_dict = {}
     
-    st.header('2. 📅 回測設定')
+    # 處理台股 (優先使用 yfinance，代碼需加 .TW)
+    for s in list(set(tickers_tw + ['0050'])):
+        try:
+            ticker = f"{s}.TW"
+            # 使用 yfinance 抓取，這通常比 FinMind 免費版穩定
+            yf_obj = yf.Ticker(ticker)
+            df = yf_obj.history(start=start, end=end, interval="1d")
+            if not df.empty:
+                # yf.history 回傳的 Close 已經是 Adjusted Close
+                data_dict[s] = df['Close']
+        except Exception as e:
+            st.sidebar.warning(f"台股 {s} 抓取嘗試失敗")
+
+    # 處理美股
+    for s in tickers_us:
+        try:
+            yf_obj = yf.Ticker(s)
+            df = yf_obj.history(start=start, end=end, interval="1d")
+            if not df.empty:
+                data_dict[s] = df['Close']
+        except Exception as e:
+            st.sidebar.warning(f"美股 {s} 抓取嘗試失敗")
+            
+    return data_dict
+
+# --- 4. 側邊欄 ---
+with st.sidebar:
+    st.header('🎯 標的設定')
+    tw_in = st.text_input('台股代號', '2330, 2454, 2317')
+    us_in = st.text_input('美股代號', 'VOO, QQQ, TSLA')
+    
+    st.header('📅 時間與資金')
     start_date = st.date_input('開始日期', datetime.now() - timedelta(days=365*3))
     end_date = st.date_input('結束日期', datetime.now())
+    initial_cap = st.number_input('本金', value=100000)
+    rf_rate = st.number_input('無風險利率 (%)', value=4.0) / 100
     
-    st.header('3. 💰 參數管理')
-    initial_capital = st.number_input('初始本金', value=100000)
-    rf = st.number_input('無風險利率 (%)', value=4.0) / 100.0
-    num_simulations = st.slider('模擬次數', 1000, 5000, 2000)
-    forecast_days = st.slider('預測天數', 30, 365, 180)
+    st.header('🎲 模擬設定')
+    sim_count = st.slider('蒙地卡羅次數', 1000, 5000, 2000)
+    forecast_len = st.slider('預測天數', 30, 365, 180)
 
-# --- 4. 強化數據抓取引擎 ---
+# --- 5. 主程式執行 ---
 if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
-    data_dict = {}
-    api = DataLoader()
+    tw_list = [x.strip() for x in tw_in.split(',') if x.strip()]
+    us_list = [x.strip().upper() for x in us_in.split(',') if x.strip()]
     
-    with st.spinner('正在同步數據... 若失敗請嘗試重新點擊按鈕'):
-        # --- A. 台股處理 (優先使用 yfinance 抓取調整後股價，穩定性較高) ---
-        tw_stocks = [s.strip() for s in tw_input.split(',') if s.strip()]
-        all_tw = list(set(tw_stocks + ['0050']))
+    with st.spinner('正在從 Yahoo Finance 節點抓取全球複權數據...'):
+        raw_data = fetch_stock_data(tw_list, us_list, start_date, end_date)
         
-        for s in all_tw:
-            success = False
-            # 1. 嘗試使用 yfinance 抓取 (加上 .TW) - 這是目前最穩定的免費來源
-            try:
-                ticker = f"{s}.TW"
-                # 加入進階設定防止被封鎖
-                yf_df = yf.download(ticker, start=start_date, end=end_date, progress=False)
-                if not yf_df.empty:
-                    # 抓取 Adj Close 確保處理除權息與分割
-                    data_dict[s] = yf_df['Adj Close']
-                    success = True
-            except: pass
-            
-            # 2. 如果 yfinance 失敗，嘗試 FinMind
-            if not success:
-                try:
-                    df = api.taiwan_stock_daily_adj(stock_id=s, start_date=start_date.strftime('%Y-%m-%d'))
-                    if not df.empty:
-                        df['date'] = pd.to_datetime(df['date'])
-                        data_dict[s] = df.set_index('date')['close']
-                        success = True
-                except: pass
-            
-            if not success:
-                st.warning(f"⚠️ 無法取得台股 {s}，請檢查代號正確性。")
-
-        # --- B. 美股處理 (yfinance) ---
-        us_stocks = [s.strip().upper() for s in us_input.split(',') if s.strip()]
-        if us_stocks:
-            try:
-                us_data = yf.download(us_stocks, start=start_date, end=end_date, progress=False)['Adj Close']
-                if isinstance(us_data, pd.Series):
-                    data_dict[us_stocks[0]] = us_data
-                else:
-                    for c in us_data.columns:
-                        data_dict[c] = us_data[c]
-            except: st.error("❌ 美股來源連線失敗")
-
-        if not data_dict:
-            st.error("❌ 無效數據。推論：可能是連線被阻擋，請稍候再試。")
+        if not raw_data:
+            st.error("❌ 所有來源均連線失敗。我不確定是否為 API 封鎖，推論：請嘗試更換日期範圍或稍後再試。")
             st.stop()
             
-        # 數據對齊、處理分割產生的 NaN 以及無窮大值
-        df_all_prices = pd.DataFrame(data_dict).ffill().dropna()
-        returns = df_all_prices.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
-        
-    # --- 功能區 ---
-    st.success(f"✅ 資料載入成功！")
-    st.download_button("📥 下載調整後數據 (CSV)", df_all_prices.to_csv().encode('utf-8'), "data.csv")
+        # 數據對齊與清理
+        df_prices = pd.DataFrame(raw_data).ffill().dropna()
+        # 處理分割與異常值導致的 Inf
+        returns = df_prices.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
 
-    # (分頁 Tab 1 ~ Tab 6 的內容與先前相同，此處省略以節省長度，確保您保留原有的分析邏輯)
-    # ... 原有分頁代碼 ...
-    # Tab 1: 統計
+    # --- 功能區：下載與統計 ---
+    st.success(f"✅ 成功載入 {len(df_prices.columns)} 檔資產數據！")
+    st.download_button("📥 下載調整後數據 (CSV)", df_prices.to_csv().encode('utf-8'), "data.csv")
+
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 統計", "🔗 相關性", "💰 模擬", "📐 市場模型", "⚖️ 效率前緣", "🔮 預測"])
+
     with tab1:
-        st.subheader("📋 資產報酬統計 (基於調整後股價)")
-        stats_df = pd.DataFrame(index=returns.columns)
-        stats_df['Ann. Return'] = returns.mean() * 252
-        stats_df['Ann. Volatility'] = returns.std() * np.sqrt(252)
-        stats_df['Sharpe Ratio'] = (stats_df['Ann. Return'] - rf) / stats_df['Ann. Volatility']
-        stats_df['Max Drawdown'] = [calculate_mdd(df_all_prices[c])[0] for c in df_all_prices.columns]
-        stats_df['Skew'] = returns.skew()
-        stats_df['Kurt'] = returns.kurt()
-        stats_df['JB_p'] = [stats.jarque_bera(returns[c])[1] for c in returns.columns]
+        st.subheader("📋 統計特徵 (已修正分割誤差)")
+        res_df = pd.DataFrame(index=returns.columns)
+        res_df['年化報酬'] = returns.mean() * 252
+        res_df['年化波動'] = returns.std() * np.sqrt(252)
+        res_df['夏普比率'] = (res_df['年化報酬'] - rf_rate) / res_df['年化波動']
+        res_df['最大回撤'] = [calculate_mdd(df_prices[c])[0] for c in df_prices.columns]
         
-        # 格式化
-        disp = stats_df.copy()
-        for col in ['Ann. Return', 'Ann. Volatility', 'Max Drawdown']:
-            disp[col] = disp[col].apply(lambda x: f"{x:.2%}")
-        disp['Normality'] = disp['JB_p'].apply(interpret_jb_test)
-        st.dataframe(disp, use_container_width=True)
-
+        # 格式化顯示
+        st.dataframe(res_df.style.format("{:.2%}"), use_container_width=True)
+        
         cols = st.columns(2)
-        for i, asset in enumerate(returns.columns):
-            with cols[i % 2]:
+        for i, col in enumerate(returns.columns):
+            with cols[i%2]:
                 fig, ax = plt.subplots(figsize=(6, 3))
-                ax.hist(returns[asset], bins=40, color='#2980b9', alpha=0.7, density=True, edgecolor='white')
+                ax.hist(returns[col], bins=40, density=True, alpha=0.7, color='steelblue')
+                ax.set_title(f"{col} 報酬率分佈")
                 st.pyplot(fig)
 
-    # Tab 2: 相關性
     with tab2:
-        st.subheader("🔗 相關性分析")
-        st.pyplot(plot_heatmap_matplotlib(returns.corr()), use_container_width=True)
-
-    # Tab 3: 投資模擬
-    with tab3:
-        st.subheader("💰 累積財富增長")
-        st.line_chart((1 + returns).cumprod() * initial_capital)
-
-    # Tab 4: 市場模型
-    with tab4:
-        st.subheader("📐 Beta 係數衡量 (基準: 0050)")
-        mkt = '0050' if '0050' in returns.columns else returns.columns[0]
-        capm_res = []
-        for s in [c for c in returns.columns if c != mkt]:
-            slope, _, r_val, _, _ = stats.linregress(returns[mkt], returns[s])
-            capm_res.append({"Asset": s, "Beta": slope, "R2": r_val**2})
-        st.dataframe(pd.DataFrame(capm_res).set_index("Asset"))
-
-    # Tab 5: 效率前緣
-    with tab5:
-        st.subheader("⚖️ 投資組合優化 (Markowitz)")
-        r_mean, r_cov = returns.mean()*252, returns.cov()*252
-        sim_res = np.zeros((3, num_simulations))
-        for i in range(num_simulations):
-            w = np.random.random(len(returns.columns)); w /= w.sum()
-            p_r = np.sum(w * r_mean); p_v = np.sqrt(np.dot(w.T, np.dot(r_cov, w)))
-            sim_res[:, i] = [p_r, p_v, (p_r - rf) / p_v]
-        
-        tidx = np.argmax(sim_res[2])
-        fig, ax = plt.subplots()
-        ax.scatter(sim_res[1], sim_res[0], c=sim_res[2], cmap='viridis', s=10)
-        ax.scatter(sim_res[1, tidx], sim_res[0, tidx], color='red', marker='*', s=200)
+        st.subheader("🔗 相關性矩陣")
+        fig, ax = plt.subplots(figsize=(10, 8))
+        corr = returns.corr()
+        im = ax.imshow(corr, cmap='RdBu_r', vmin=-1, vmax=1)
+        plt.colorbar(im)
+        ax.set_xticks(range(len(corr.columns))); ax.set_xticklabels(corr.columns, rotation=45)
+        ax.set_yticks(range(len(corr.columns))); ax.set_yticklabels(corr.columns)
         st.pyplot(fig)
 
-    # Tab 6: 預測
+    with tab3:
+        st.subheader("💰 財富累積曲線")
+        st.line_chart((1 + returns).cumprod() * initial_cap)
+
+    with tab4:
+        st.subheader("📐 市場模型 (Beta)")
+        mkt = '0050' if '0050' in returns.columns else returns.columns[0]
+        beta_data = []
+        for s in [c for c in returns.columns if c != mkt]:
+            slope, _, r_val, _, _ = stats.linregress(returns[mkt], returns[s])
+            beta_data.append({"Asset": s, "Beta": slope, "R2": r_val**2})
+        st.table(pd.DataFrame(beta_data))
+
+    with tab5:
+        st.subheader("⚖️ 效率前緣")
+        r_mean, r_cov = returns.mean()*252, returns.cov()*252
+        p_res = np.zeros((3, sim_count))
+        for i in range(sim_count):
+            w = np.random.random(len(returns.columns)); w /= w.sum()
+            p_r = np.sum(w * r_mean); p_v = np.sqrt(np.dot(w.T, np.dot(r_cov, w)))
+            p_res[:, i] = [p_r, p_v, (p_r - rf_rate) / p_v]
+        
+        fig, ax = plt.subplots()
+        ax.scatter(p_res[1], p_res[0], c=p_res[2], cmap='viridis', s=5)
+        ax.set_xlabel("風險"); ax.set_ylabel("報酬")
+        st.pyplot(fig)
+
     with tab6:
         st.subheader("🔮 股價未來模擬")
-        tgt = st.selectbox("選擇預測標的", returns.columns)
-        s0, mu, sigma = df_all_prices[tgt].iloc[-1], returns[tgt].mean()*252, returns[tgt].std()*np.sqrt(252)
+        tgt = st.selectbox("標的", returns.columns)
+        s0, mu, sigma = df_prices[tgt].iloc[-1], returns[tgt].mean()*252, returns[tgt].std()*np.sqrt(252)
         dt = 1/252
-        paths = pd.DataFrame([s0 * np.exp(np.cumsum((mu-0.5*sigma**2)*dt + sigma*np.sqrt(dt)*np.random.normal(0,1,forecast_days))) for _ in range(50)]).T
-        st.line_chart(paths)
-
+        sim_paths = pd.DataFrame([s0 * np.exp(np.cumsum((mu - 0.5 * sigma**2) * dt + sigma * np.sqrt(dt) * np.random.normal(0, 1, forecast_len))) for _ in range(50)]).T
+        st.line_chart(sim_paths)
