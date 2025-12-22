@@ -22,34 +22,28 @@ def calculate_mdd(series):
     drawdown = (series - cum_max) / cum_max
     return drawdown.min(), drawdown
 
-# --- 3. 強化型數據抓取函數 (帶快取與偽裝) ---
-@st.cache_data(ttl=3600)  # 快取一小時，減少請求次數
+# --- 3. 強化型數據抓取函數 ---
+@st.cache_data(ttl=3600)
 def fetch_stock_data(tickers_tw, tickers_us, start, end):
     data_dict = {}
-    
-    # 處理台股 (優先使用 yfinance，代碼需加 .TW)
     for s in list(set(tickers_tw + ['0050'])):
         try:
             ticker = f"{s}.TW"
-            # 使用 yfinance 抓取，這通常比 FinMind 免費版穩定
             yf_obj = yf.Ticker(ticker)
             df = yf_obj.history(start=start, end=end, interval="1d")
             if not df.empty:
-                # yf.history 回傳的 Close 已經是 Adjusted Close
                 data_dict[s] = df['Close']
-        except Exception as e:
+        except:
             st.sidebar.warning(f"台股 {s} 抓取嘗試失敗")
 
-    # 處理美股
     for s in tickers_us:
         try:
             yf_obj = yf.Ticker(s)
             df = yf_obj.history(start=start, end=end, interval="1d")
             if not df.empty:
                 data_dict[s] = df['Close']
-        except Exception as e:
+        except:
             st.sidebar.warning(f"美股 {s} 抓取嘗試失敗")
-            
     return data_dict
 
 # --- 4. 側邊欄 ---
@@ -65,7 +59,8 @@ with st.sidebar:
     rf_rate = st.number_input('無風險利率 (%)', value=4.0) / 100
     
     st.header('🎲 模擬設定')
-    sim_count = st.slider('蒙地卡羅次數', 1000, 5000, 2000)
+    # 這裡統一變數名稱為 num_simulations
+    num_simulations = st.slider('蒙地卡羅次數', 1000, 5000, 2000)
     forecast_len = st.slider('預測天數', 30, 365, 180)
 
 # --- 5. 主程式執行 ---
@@ -77,29 +72,24 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
         raw_data = fetch_stock_data(tw_list, us_list, start_date, end_date)
         
         if not raw_data:
-            st.error("❌ 所有來源均連線失敗。我不確定是否為 API 封鎖，推論：請嘗試更換日期範圍或稍後再試。")
+            st.error("❌ 所有來源均連線失敗。請嘗試更換日期範圍或稍後再試。")
             st.stop()
             
-        # 數據對齊與清理
         df_prices = pd.DataFrame(raw_data).ffill().dropna()
-        # 處理分割與異常值導致的 Inf
         returns = df_prices.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
 
-    # --- 功能區：下載與統計 ---
     st.success(f"✅ 成功載入 {len(df_prices.columns)} 檔資產數據！")
     st.download_button("📥 下載調整後數據 (CSV)", df_prices.to_csv().encode('utf-8'), "data.csv")
 
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 統計", "🔗 相關性", "💰 模擬", "📐 市場模型", "⚖️ 效率前緣", "🔮 預測"])
 
     with tab1:
-        st.subheader("📋 統計特徵 (已修正分割誤差)")
+        st.subheader("📋 統計特徵")
         res_df = pd.DataFrame(index=returns.columns)
         res_df['年化報酬'] = returns.mean() * 252
         res_df['年化波動'] = returns.std() * np.sqrt(252)
         res_df['夏普比率'] = (res_df['年化報酬'] - rf_rate) / res_df['年化波動']
         res_df['最大回撤'] = [calculate_mdd(df_prices[c])[0] for c in df_prices.columns]
-        
-        # 格式化顯示
         st.dataframe(res_df.style.format("{:.2%}"), use_container_width=True)
         
         cols = st.columns(2)
@@ -133,59 +123,46 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
             beta_data.append({"Asset": s, "Beta": slope, "R2": r_val**2})
         st.table(pd.DataFrame(beta_data))
 
-    # --- Tab 5: 效率前緣 (新增最佳權重顯示) ---
     with tab5:
         st.subheader("⚖️ 最佳投資組合配置")
-        
-        # 1. 準備數據
         r_mean = returns.mean() * 252
         r_cov = returns.cov() * 252
         
-        # 2. 模擬並記錄權重
         sim_res = np.zeros((3, num_simulations))
-        all_weights = np.zeros((num_simulations, len(returns.columns))) # 新增：存放所有模擬的權重
+        all_weights = np.zeros((num_simulations, len(returns.columns)))
         
         for i in range(num_simulations):
             w = np.random.random(len(returns.columns))
             w /= w.sum()
-            all_weights[i, :] = w # 記錄這組權重
-            
+            all_weights[i, :] = w
             p_r = np.sum(w * r_mean)
             p_v = np.sqrt(np.dot(w.T, np.dot(r_cov, w)))
-            sim_res[:, i] = [p_r, p_v, (p_r - rf) / p_v]
+            # 夏普比率計算修正變數名稱
+            sim_res[:, i] = [p_r, p_v, (p_r - rf_rate) / p_v]
         
-        # 3. 找出最佳索引 (Max Sharpe Ratio)
         tidx = np.argmax(sim_res[2])
-        best_weights = all_weights[tidx, :] # 取得最優組合的權重
+        best_weights = all_weights[tidx, :]
         
-        # --- 視覺化呈現 ---
         col1, col2 = st.columns([3, 2])
-        
         with col1:
             st.write("**效率前緣分佈圖**")
             fig, ax = plt.subplots(figsize=(10, 6))
             sc = ax.scatter(sim_res[1], sim_res[0], c=sim_res[2], cmap='viridis', s=10, alpha=0.5)
             ax.scatter(sim_res[1, tidx], sim_res[0, tidx], color='red', marker='*', s=200, label='最佳夏普組合')
-            ax.set_xlabel("年化波動率 (風險)"); ax.set_ylabel("年化預期報酬")
+            ax.set_xlabel("風險"); ax.set_ylabel("報酬")
             plt.colorbar(sc, label='夏普比率')
             st.pyplot(fig)
-    
+
         with col2:
             st.write("**最佳資產配置比例**")
-            # 建立權重表格
-            df_weights = pd.DataFrame({
-                '資產': returns.columns,
-                '配置比例 (%)': best_weights * 100
-            }).sort_values(by='配置比例 (%)', ascending=False)
+            df_weights = pd.DataFrame({'資產': returns.columns, '比例': best_weights * 100})
+            df_weights = df_weights.sort_values(by='比例', ascending=False)
             
-            # 繪製圓餅圖
             fig_pie, ax_pie = plt.subplots()
-            ax_pie.pie(df_weights['配置比例 (%)'], labels=df_weights['資產'], 
-                       autopct='%1.1f%%', startangle=140, colors=plt.cm.Paired.colors)
-            ax_pie.axis('equal')  # 確保圓餅圖是圓的
+            ax_pie.pie(df_weights['比例'], labels=df_weights['資產'], autopct='%1.1f%%', startangle=140)
+            ax_pie.axis('equal')
             st.pyplot(fig_pie)
-            
-            st.dataframe(df_weights.style.format({'配置比例 (%)': '{:.2f}%'}), use_container_width=True)
+            st.dataframe(df_weights.style.format({'比例': '{:.2f}%'}))
 
     with tab6:
         st.subheader("🔮 股價未來模擬")
@@ -194,8 +171,3 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
         dt = 1/252
         sim_paths = pd.DataFrame([s0 * np.exp(np.cumsum((mu - 0.5 * sigma**2) * dt + sigma * np.sqrt(dt) * np.random.normal(0, 1, forecast_len))) for _ in range(50)]).T
         st.line_chart(sim_paths)
-
-
-
-
-
