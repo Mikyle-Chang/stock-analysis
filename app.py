@@ -3,14 +3,13 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy import stats
-# 修正 3: 移除未使用的 FinMind 引用，保持潔淨
 import yfinance as yf
 from datetime import datetime, timedelta
 
 # --- 1. 頁面設定 ---
 st.set_page_config(page_title="全球投資組合分析系統", layout="wide", page_icon="📈")
 
-# 設定中文字體 (完全保留您原始的設定)
+# 設定中文字體
 plt.style.use('bmh')
 plt.rcParams['font.sans-serif'] = ['Microsoft JhengHei', 'Arial']
 plt.rcParams['axes.unicode_minus'] = False
@@ -26,9 +25,6 @@ def calculate_mdd(series):
 @st.cache_data(ttl=3600)
 def fetch_stock_data(tickers_tw, tickers_us, start, end):
     data_dict = {}
-    
-    # 修正 4 的前置作業: 確保抓取 0050 以備 Beta 計算使用 (但不一定顯示在組合中)
-    # 為了不影響您的原始清單，這裡僅在內部邏輯加入
     unique_tw = list(set(tickers_tw + ['0050']))
     
     for s in unique_tw:
@@ -36,7 +32,6 @@ def fetch_stock_data(tickers_tw, tickers_us, start, end):
         try:
             ticker = f"{s}.TW"
             yf_obj = yf.Ticker(ticker)
-            # 修正 1: 加入 auto_adjust=True 以獲取還原權值股價 (Total Return)
             df = yf_obj.history(start=start, end=end, interval="1d", auto_adjust=True)
             if not df.empty:
                 data_dict[s] = df['Close']
@@ -47,7 +42,6 @@ def fetch_stock_data(tickers_tw, tickers_us, start, end):
         if not s: continue
         try:
             yf_obj = yf.Ticker(s)
-            # 修正 1: 加入 auto_adjust=True
             df = yf_obj.history(start=start, end=end, interval="1d", auto_adjust=True)
             if not df.empty:
                 data_dict[s] = df['Close']
@@ -58,7 +52,6 @@ def fetch_stock_data(tickers_tw, tickers_us, start, end):
 # --- 4. 側邊欄 ---
 with st.sidebar:
     st.header('🎯 標的設定')
-    # 還原您原始的預設值
     tw_in = st.text_input('台股代號', '1215,1419,2430,2891,9918')
     us_in = st.text_input('美股代號', 'DBC,GLD,SPY,VCIT,VNQ,VTV,VUG')
     
@@ -95,12 +88,9 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
     with tab1:
         st.subheader("📋 統計特徵")
         res_df = pd.DataFrame(index=returns.columns)
-        # 1. 先算出總天數與總報酬倍數
         total_days = (df_prices.index[-1] - df_prices.index[0]).days
-        years = total_days / 365.25
+        years = max(total_days / 365.25, 0.1) # 避免除以零
         
-        # 2. 用「期末除以期初」開根號的方式計算幾何年化報酬 (CAGR)
-        # 這種算法才能反映 0050 真正的資產翻倍實力
         res_df['年化報酬'] = (df_prices.iloc[-1] / df_prices.iloc[0]) ** (1 / years) - 1
         res_df['年化波動'] = returns.std() * np.sqrt(252)
         res_df['夏普比率'] = (res_df['年化報酬'] - rf_rate) / res_df['年化波動']
@@ -131,8 +121,6 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
 
     with tab4:
         st.subheader("📐 市場模型 (Beta)")
-        
-        # 修正 4: 智慧選擇 Beta 基準 (SPY > 0050 > 第一個資產)
         if 'SPY' in returns.columns:
             mkt = 'SPY'
         elif '0050' in returns.columns:
@@ -144,7 +132,6 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
             
         beta_data = []
         for s in [c for c in returns.columns if c != mkt]:
-            # 確保數據對齊，避免長度不一報錯
             common_df = pd.concat([returns[mkt], returns[s]], axis=1).dropna()
             if len(common_df) > 10:
                 slope, _, r_val, _, _ = stats.linregress(common_df.iloc[:,0], common_df.iloc[:,1])
@@ -162,13 +149,13 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
         for i in range(num_simulations):
             w = np.random.random(len(returns.columns))
             w /= w.sum()
-            all_weights[i, '🙂'] = w
+            all_weights[i, :] = w  # 修正 1: 移除 emoji 索引，改用標準 numpy 索引
             p_r = np.sum(w * r_mean)
             p_v = np.sqrt(np.dot(w.T, np.dot(r_cov, w)))
             sim_res[:, i] = [p_r, p_v, (p_r - rf_rate) / p_v]
         
         tidx = np.argmax(sim_res[2])
-        best_weights = all_weights[tidx, '🙂']
+        best_weights = all_weights[tidx, :] # 修正 2: 同上
         
         col1, col2 = st.columns([3, 2])
         with col1:
@@ -176,7 +163,7 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
             fig, ax = plt.subplots(figsize=(10, 6))
             sc = ax.scatter(sim_res[1], sim_res[0], c=sim_res[2], cmap='viridis', s=10, alpha=0.5)
             ax.scatter(sim_res[1, tidx], sim_res[0, tidx], color='red', marker='*', s=200, label='最佳夏普組合')
-            ax.set_xlabel("風險"); ax.set_ylabel("報酬")
+            ax.set_xlabel("風險 (波動率)"); ax.set_ylabel("預期報酬")
             plt.colorbar(sc, label='夏普比率')
             st.pyplot(fig)
 
@@ -192,16 +179,14 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
             st.dataframe(df_weights.style.format({'比例': '{:.2f}%'}))
 
     with tab6:
-        st.subheader("🔮 股價未來模擬")
+        st.subheader("🔮 股價未來模擬 (GBM)")
         tgt = st.selectbox("標的", returns.columns)
         
-        # 修正 5: 優化 GBM 模擬邏輯 (增加可讀性與向量化效能，並確保公式清晰)
         s0 = df_prices[tgt].iloc[-1]
         mu = returns[tgt].mean() * 252
         sigma = returns[tgt].std() * np.sqrt(252)
         dt = 1/252
         
-        # 預先建立矩陣
         sim_paths = np.zeros((forecast_len, 50))
         sim_paths[0] = s0
         
