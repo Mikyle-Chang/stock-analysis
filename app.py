@@ -117,7 +117,7 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
                     fig, ax = plt.subplots(figsize=(6, 3))
                     ax.hist(returns[col], bins=40, density=True, alpha=0.7, color='steelblue')
                     ax.set_title(f"{col} Distribution of Returns")
-                    st.pyplot(fig))
+                    st.pyplot(fig)
 
     with tab2:
         st.subheader("🔗 相關性矩陣")
@@ -212,5 +212,6 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
             sim_paths[t] = sim_paths[t-1] * np.exp(drift + shock * z)
             
         st.line_chart(sim_paths)
+
 
 
