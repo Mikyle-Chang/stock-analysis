@@ -171,90 +171,90 @@ if st.session_state.analysis_started:
         return get_portfolio_performance(weights, mu, S, rf_rate)[1]
 
 with tab5:
-        st.subheader("⚖️ 效率前緣與最佳配置 (Scipy Optimize)")
-        
-        # --- 1. 計算邏輯 (完全保留您的原始邏輯) ---
-        num_assets = len(returns.columns)
-        sim_res = np.zeros((3, num_simulations))
-        for i in range(num_simulations):
-            w = np.random.random(num_assets)
-            w /= np.sum(w)
-            p_ret, p_std = get_portfolio_performance(w, mu, S, rf_rate)
-            sim_res[0,i] = p_std
-            sim_res[1,i] = p_ret
-            sim_res[2,i] = (p_ret - rf_rate) / p_std 
+    st.subheader("⚖️ 效率前緣與最佳配置 (Scipy Optimize)")
+    
+    # --- 1. 計算邏輯 (完全保留您的原始邏輯) ---
+    num_assets = len(returns.columns)
+    sim_res = np.zeros((3, num_simulations))
+    for i in range(num_simulations):
+        w = np.random.random(num_assets)
+        w /= np.sum(w)
+        p_ret, p_std = get_portfolio_performance(w, mu, S, rf_rate)
+        sim_res[0,i] = p_std
+        sim_res[1,i] = p_ret
+        sim_res[2,i] = (p_ret - rf_rate) / p_std 
 
-        constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
-        bounds = tuple((0, 1) for _ in range(num_assets))
-        init_guess = num_assets * [1. / num_assets,]
+    constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
+    bounds = tuple((0, 1) for _ in range(num_assets))
+    init_guess = num_assets * [1. / num_assets,]
 
-        opt_sharpe = sco.minimize(neg_sharpe_ratio, init_guess, args=(mu, S, rf_rate), 
-                                  method='SLSQP', bounds=bounds, constraints=constraints)
-        sharpe_ret, sharpe_vol = get_portfolio_performance(opt_sharpe.x, mu, S, rf_rate)
-        best_weights = opt_sharpe.x 
+    opt_sharpe = sco.minimize(neg_sharpe_ratio, init_guess, args=(mu, S, rf_rate), 
+                              method='SLSQP', bounds=bounds, constraints=constraints)
+    sharpe_ret, sharpe_vol = get_portfolio_performance(opt_sharpe.x, mu, S, rf_rate)
+    best_weights = opt_sharpe.x 
 
-        opt_vol = sco.minimize(minimize_volatility, init_guess, args=(mu, S, rf_rate), 
-                               method='SLSQP', bounds=bounds, constraints=constraints)
-        min_vol_ret, min_vol_vol = get_portfolio_performance(opt_vol.x, mu, S, rf_rate)
+    opt_vol = sco.minimize(minimize_volatility, init_guess, args=(mu, S, rf_rate), 
+                           method='SLSQP', bounds=bounds, constraints=constraints)
+    min_vol_ret, min_vol_vol = get_portfolio_performance(opt_vol.x, mu, S, rf_rate)
 
-        target_returns = np.linspace(min_vol_ret, max(sharpe_ret, sim_res[1].max()) * 1.05, 50)
-        frontier_vol = []
-        for t_ret in target_returns:
-            cons = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
-                    {'type': 'eq', 'fun': lambda x: get_portfolio_performance(x, mu, S, rf_rate)[0] - t_ret})
-            res = sco.minimize(minimize_volatility, init_guess, args=(mu, S, rf_rate), 
-                               method='SLSQP', bounds=bounds, constraints=cons)
-            frontier_vol.append(res.fun if res.success else np.nan)
+    target_returns = np.linspace(min_vol_ret, max(sharpe_ret, sim_res[1].max()) * 1.05, 50)
+    frontier_vol = []
+    for t_ret in target_returns:
+        cons = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                {'type': 'eq', 'fun': lambda x: get_portfolio_performance(x, mu, S, rf_rate)[0] - t_ret})
+        res = sco.minimize(minimize_volatility, init_guess, args=(mu, S, rf_rate), 
+                           method='SLSQP', bounds=bounds, constraints=cons)
+        frontier_vol.append(res.fun if res.success else np.nan)
 
-        # --- 2. 上方區塊：效率前緣大圖 (單獨一排) ---
-        fig, ax = plt.subplots(figsize=(12, 6))
-        sc = ax.scatter(sim_res[0,:], sim_res[1,:], c=sim_res[2,:], cmap='viridis', s=15, alpha=0.4, label='Random Portfolios')
-        plt.colorbar(sc, label='Sharpe Ratio')
-        ax.plot(frontier_vol, target_returns, 'b-', linewidth=2.5, label='Efficient Frontier')
-        
-        asset_ret = mu * 252
-        asset_vol = np.sqrt(np.diag(S)) * np.sqrt(252)
-        ax.scatter(asset_vol, asset_ret, marker='o', color='grey', s=50, label='Individual Assets')
-        for i, txt in enumerate(returns.columns):
-            ax.annotate(txt, (asset_vol[i], asset_ret[i]), xytext=(5,0), textcoords='offset points')
+    # --- 2. 上方區塊：效率前緣大圖 (單獨一排) ---
+    fig, ax = plt.subplots(figsize=(12, 6))
+    sc = ax.scatter(sim_res[0,:], sim_res[1,:], c=sim_res[2,:], cmap='viridis', s=15, alpha=0.4, label='Random Portfolios')
+    plt.colorbar(sc, label='Sharpe Ratio')
+    ax.plot(frontier_vol, target_returns, 'b-', linewidth=2.5, label='Efficient Frontier')
+    
+    asset_ret = mu * 252
+    asset_vol = np.sqrt(np.diag(S)) * np.sqrt(252)
+    ax.scatter(asset_vol, asset_ret, marker='o', color='grey', s=50, label='Individual Assets')
+    for i, txt in enumerate(returns.columns):
+        ax.annotate(txt, (asset_vol[i], asset_ret[i]), xytext=(5,0), textcoords='offset points')
 
-        ax.scatter(min_vol_vol, min_vol_ret, marker='*', color='orange', s=250, edgecolors='black', label='Min Volatility (MVP)', zorder=10)
-        ax.scatter(sharpe_vol, sharpe_ret, marker='*', color='purple', s=250, edgecolors='black', label='Max Sharpe (MSR)', zorder=10)
-        
-        cml_x = np.linspace(0, max(sim_res[0].max(), sharpe_vol)*1.2, 100)
-        cml_slope = (sharpe_ret - rf_rate) / sharpe_vol
-        ax.plot(cml_x, rf_rate + cml_slope * cml_x, 'g--', label='Capital Market Line (CML)', alpha=0.7)
+    ax.scatter(min_vol_vol, min_vol_ret, marker='*', color='orange', s=250, edgecolors='black', label='Min Volatility (MVP)', zorder=10)
+    ax.scatter(sharpe_vol, sharpe_ret, marker='*', color='purple', s=250, edgecolors='black', label='Max Sharpe (MSR)', zorder=10)
+    
+    cml_x = np.linspace(0, max(sim_res[0].max(), sharpe_vol)*1.2, 100)
+    cml_slope = (sharpe_ret - rf_rate) / sharpe_vol
+    ax.plot(cml_x, rf_rate + cml_slope * cml_x, 'g--', label='Capital Market Line (CML)', alpha=0.7)
 
-        ax.set_title(f"Efficient Frontier & Optimal Portfolios (Rf={rf_rate*100:.2f}%)", fontsize=14)
-        ax.set_xlabel("Annualized Volatility (Risk)")
-        ax.set_ylabel("Annualized Expected Return")
-        ax.legend(loc='best')
-        st.pyplot(fig)
+    ax.set_title(f"Efficient Frontier & Optimal Portfolios (Rf={rf_rate*100:.2f}%)", fontsize=14)
+    ax.set_xlabel("Annualized Volatility (Risk)")
+    ax.set_ylabel("Annualized Expected Return")
+    ax.legend(loc='best')
+    st.pyplot(fig)
 
-        st.markdown("---")
+    st.markdown("---")
 
-        # --- 3. 下方區塊：兩個圓餅圖並排 ---
-        col_left, col_right = st.columns(2)
+    # --- 3. 下方區塊：兩個圓餅圖並排 ---
+    col_left, col_right = st.columns(2)
 
-        with col_left:
-            st.write("#### 🏆 Maximum Sharpe Ratio (MSR)")
-            df_sharpe = pd.DataFrame({'Asset': returns.columns, 'Weight': best_weights * 100})
-            df_sharpe = df_sharpe.sort_values(by='Weight', ascending=False)
-            fig_pie1, ax_pie1 = plt.subplots(figsize=(4, 4))
-            ax_pie1.pie(df_sharpe['Weight'], labels=df_sharpe['Asset'], autopct='%1.1f%%', startangle=90)
-            st.pyplot(fig_pie1)
-            st.dataframe(df_sharpe.style.format({'Weight': '{:.2f}%'}), hide_index=True, use_container_width=True)
-            st.info(f"Ret: {sharpe_ret:.2%} / Vol: {sharpe_vol:.2%}")
+    with col_left:
+        st.write("#### 🏆 Maximum Sharpe Ratio (MSR)")
+        df_sharpe = pd.DataFrame({'Asset': returns.columns, 'Weight': best_weights * 100})
+        df_sharpe = df_sharpe.sort_values(by='Weight', ascending=False)
+        fig_pie1, ax_pie1 = plt.subplots(figsize=(4, 4))
+        ax_pie1.pie(df_sharpe['Weight'], labels=df_sharpe['Asset'], autopct='%1.1f%%', startangle=90)
+        st.pyplot(fig_pie1)
+        st.dataframe(df_sharpe.style.format({'Weight': '{:.2f}%'}), hide_index=True, use_container_width=True)
+        st.info(f"Ret: {sharpe_ret:.2%} / Vol: {sharpe_vol:.2%}")
 
-        with col_right:
-            st.write("#### 🛡️ Minimum Variance Portfolio (MVP)")
-            df_mvp = pd.DataFrame({'Asset': returns.columns, 'Weight': opt_vol.x * 100})
-            df_mvp = df_mvp.sort_values(by='Weight', ascending=False)
-            fig_pie2, ax_pie2 = plt.subplots(figsize=(4, 4))
-            ax_pie2.pie(df_mvp['Weight'], labels=df_mvp['Asset'], autopct='%1.1f%%', startangle=90)
-            st.pyplot(fig_pie2)
-            st.dataframe(df_mvp.style.format({'Weight': '{:.2f}%'}), hide_index=True, use_container_width=True)
-            st.info(f"Ret: {min_vol_ret:.2%} / Vol: {min_vol_vol:.2%}")
+    with col_right:
+        st.write("#### 🛡️ Minimum Variance Portfolio (MVP)")
+        df_mvp = pd.DataFrame({'Asset': returns.columns, 'Weight': opt_vol.x * 100})
+        df_mvp = df_mvp.sort_values(by='Weight', ascending=False)
+        fig_pie2, ax_pie2 = plt.subplots(figsize=(4, 4))
+        ax_pie2.pie(df_mvp['Weight'], labels=df_mvp['Asset'], autopct='%1.1f%%', startangle=90)
+        st.pyplot(fig_pie2)
+        st.dataframe(df_mvp.style.format({'Weight': '{:.2f}%'}), hide_index=True, use_container_width=True)
+        st.info(f"Ret: {min_vol_ret:.2%} / Vol: {min_vol_vol:.2%}")
             
 # --- TAB 6: 混合語言版 (介面優化：字體縮小 / 明確標示 MSR) ---
     with tab6:
@@ -460,6 +460,7 @@ with tab5:
                 st.table(pd.DataFrame(scene_data))
     
             st.info(f"💡 註：目前組合的加權 Beta 為 **{port_beta:.2f}**。這代表當大盤下跌 1% 時，預計你的組合會隨之變動 {abs(port_beta):.2f}%。")
+
 
 
 
