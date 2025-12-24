@@ -86,24 +86,38 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 統計", "🔗 相關性", "💰 模擬", "📐 市場模型", "⚖️ 效率前緣", "🔮 預測"])
 
     with tab1:
-        st.subheader("📋 統計特徵")
-        res_df = pd.DataFrame(index=returns.columns)
-        total_days = (df_prices.index[-1] - df_prices.index[0]).days
-        years = max(total_days / 365.25, 0.1) # 避免除以零
-        
-        res_df['年化報酬'] = (df_prices.iloc[-1] / df_prices.iloc[0]) ** (1 / years) - 1
-        res_df['年化波動'] = returns.std() * np.sqrt(252)
-        res_df['夏普比率'] = (res_df['年化報酬'] - rf_rate) / res_df['年化波動']
-        res_df['最大回撤'] = [calculate_mdd(df_prices[c])[0] for c in df_prices.columns]
-        st.dataframe(res_df.style.format("{:.2%}"), use_container_width=True)
-        
-        cols = st.columns(2)
-        for i, col in enumerate(returns.columns):
-            with cols[i%2]:
-                fig, ax = plt.subplots(figsize=(6, 3))
-                ax.hist(returns[col], bins=40, density=True, alpha=0.7, color='steelblue')
-                ax.set_title(f"{col} Distribution of Returns")
-                st.pyplot(fig)
+            st.subheader("📋 統計特特征")
+            res_df = pd.DataFrame(index=returns.columns)
+            total_days = (df_prices.index[-1] - df_prices.index[0]).days
+            years = max(total_days / 365.25, 0.1) # 避免除以零
+            
+            res_df['年化報酬'] = (df_prices.iloc[-1] / df_prices.iloc[0]) ** (1 / years) - 1
+            res_df['年化波動'] = returns.std() * np.sqrt(252)
+            res_df['夏普比率'] = (res_df['年化報酬'] - rf_rate) / res_df['年化波動']
+            res_df['最大回撤'] = [calculate_mdd(df_prices[c])[0] for c in df_prices.columns]
+            
+            # --- 新增內容：常態性檢定 ---
+            normality_results = []
+            for col in returns.columns:
+                # 執行 Jarque-Bera 檢定，回傳 (統計量, p-value)
+                _, p_val = stats.jarque_bera(returns[col])
+                # 若 p-value > 0.05，代表無法拒絕常態分佈假設 (即符合常態)
+                normality_results.append("✅ 是" if p_val > 0.05 else "❌ 否")
+            
+            res_df['符合常態'] = normality_results
+            # ------------------------
+            
+            # 格式化顯示 (注意：因為新增了文字欄位，所以 style.format 需指定對象)
+            numeric_cols = ['年化報酬', '年化波動', '夏普比率', '最大回撤']
+            st.dataframe(res_df.style.format({c: "{:.2%}" for c in numeric_cols}), use_container_width=True)
+            
+            cols = st.columns(2)
+            for i, col in enumerate(returns.columns):
+                with cols[i%2]:
+                    fig, ax = plt.subplots(figsize=(6, 3))
+                    ax.hist(returns[col], bins=40, density=True, alpha=0.7, color='steelblue')
+                    ax.set_title(f"{col} Distribution of Returns")
+                    st.pyplot(fig))
 
     with tab2:
         st.subheader("🔗 相關性矩陣")
@@ -198,4 +212,5 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
             sim_paths[t] = sim_paths[t-1] * np.exp(drift + shock * z)
             
         st.line_chart(sim_paths)
+
 
