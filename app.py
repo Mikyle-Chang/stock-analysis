@@ -94,7 +94,7 @@ if st.session_state.analysis_started:
     st.success(f"✅ 成功載入 {len(df_prices.columns)} 檔資產數據！")
     st.download_button("📥 下載調整後數據 (CSV)", df_prices.to_csv().encode('utf-8'), "data.csv")
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📊 統計", "🔗 相關性", "💰 模擬", "📐 市場模型", "⚖️ 效率前緣", "🔮 預測", "🚨 壓力測試"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📊 統計", "🔗 相關性", "💰 模擬", "📐 市場模型", "⚖️ 效率前緣", "🔮 預測", "🚨 (黑天鵝)壓力測試"])
 
     with tab1:
         st.subheader("📋 統計特徵")
@@ -159,13 +159,13 @@ if st.session_state.analysis_started:
         for i in range(num_simulations):
             w = np.random.random(len(returns.columns))
             w /= w.sum()
-            all_weights[i, 🙂 = w
+            all_weights[i, :] = w
             p_r = np.sum(w * r_mean)
             p_v = np.sqrt(np.dot(w.T, np.dot(r_cov, w)))
             sim_res[:, i] = [p_r, p_v, (p_r - rf_rate) / p_v]
         
         tidx = np.argmax(sim_res[2])
-        best_weights = all_weights[tidx, 🙂
+        best_weights = all_weights[tidx, :]
         
         col1, col2 = st.columns([3, 2])
         with col1:
@@ -237,7 +237,7 @@ if st.session_state.analysis_started:
             col1, col2 = st.columns([2, 3])
             
             with col1:
-                st.write("*自定義市場衝擊預測*")
+                st.write("**自定義市場衝擊預測**")
                 mkt_shock = st.slider("假設大盤(市場基準)下跌 (%)", -50, 0, -10)
                 
                 # 預估損失 = 本金 * 市場跌幅 * 組合 Beta
@@ -248,7 +248,7 @@ if st.session_state.analysis_started:
                 st.metric("預估損失金額", f"${est_loss_amt:,.0f}")
                 
             with col2:
-                st.write("*歷史極端情境模擬*")
+                st.write("**歷史極端情境模擬**")
                 scenarios = {
                     "2008 金融海嘯 (假設大盤 -20%)": -0.20,
                     "2020 疫情崩盤 (假設大盤 -15%)": -0.15,
@@ -269,3 +269,5 @@ if st.session_state.analysis_started:
                 st.table(pd.DataFrame(scene_data))
     
             st.info(f"💡 註：目前組合的加權 Beta 為 **{port_beta:.2f}**。這代表當大盤下跌 1% 時，預計你的組合會隨之變動 {abs(port_beta):.2f}%。")
+
+
