@@ -102,7 +102,7 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
             with cols[i%2]:
                 fig, ax = plt.subplots(figsize=(6, 3))
                 ax.hist(returns[col], bins=40, density=True, alpha=0.7, color='steelblue')
-                ax.set_title(f"{col} 報酬率分佈")
+                ax.set_title(f"{col} Distribution of Returns")
                 st.pyplot(fig)
 
     with tab2:
@@ -162,9 +162,9 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
             st.write("效率前緣分佈圖")
             fig, ax = plt.subplots(figsize=(10, 6))
             sc = ax.scatter(sim_res[1], sim_res[0], c=sim_res[2], cmap='viridis', s=10, alpha=0.5)
-            ax.scatter(sim_res[1, tidx], sim_res[0, tidx], color='red', marker='*', s=200, label='最佳夏普組合')
-            ax.set_xlabel("風險 (波動率)"); ax.set_ylabel("預期報酬")
-            plt.colorbar(sc, label='夏普比率')
+            ax.scatter(sim_res[1, tidx], sim_res[0, tidx], color='red', marker='*', s=200, label='MSR')
+            ax.set_xlabel("Risk"); ax.set_ylabel("Exp. Ret.")
+            plt.colorbar(sc, label='sharp ratio')
             st.pyplot(fig)
 
         with col2:
@@ -198,3 +198,4 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
             sim_paths[t] = sim_paths[t-1] * np.exp(drift + shock * z)
             
         st.line_chart(sim_paths)
+
