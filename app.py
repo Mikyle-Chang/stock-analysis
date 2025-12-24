@@ -149,43 +149,118 @@ if st.session_state.analysis_started:
                 beta_data.append({"Asset": s, "Benchmark": mkt_ref, "Beta": slope, "R2": r_val**2})
         st.table(pd.DataFrame(beta_data))
 
+# --- 在 tab5 之前先準備好最佳化所需的數據與函數 ---
+    import scipy.optimize as sco
+
+    # 1. 計算日均報酬與共變異矩陣
+    mu = returns.mean()
+    S = returns.cov()
+
+    def get_portfolio_performance(weights, mu, S, rf_rate):
+        # 計算年化報酬與年化波動
+        p_ret = np.sum(mu * weights) * 252
+        p_std = np.sqrt(np.dot(weights.T, np.dot(S * 252, weights)))
+        return p_ret, p_std
+
+    def neg_sharpe_ratio(weights, mu, S, rf_rate):
+        p_ret, p_std = get_portfolio_performance(weights, mu, S, rf_rate)
+        return -(p_ret - rf_rate) / p_std
+
+    def minimize_volatility(weights, mu, S, rf_rate):
+        return get_portfolio_performance(weights, mu, S, rf_rate)[1]
+
     with tab5:
-        st.subheader("⚖️ 最佳投資組合配置")
-        r_mean = returns.mean() * 252
-        r_cov = returns.cov() * 252
-        sim_res = np.zeros((3, num_simulations))
-        all_weights = np.zeros((num_simulations, len(returns.columns)))
+        st.subheader("⚖️ 效率前緣與最佳配置 (Scipy Optimize)")
         
-        for i in range(num_simulations):
-            w = np.random.random(len(returns.columns))
-            w /= w.sum()
-            all_weights[i, :] = w
-            p_r = np.sum(w * r_mean)
-            p_v = np.sqrt(np.dot(w.T, np.dot(r_cov, w)))
-            sim_res[:, i] = [p_r, p_v, (p_r - rf_rate) / p_v]
+        col_main, col_info = st.columns([3, 1])
         
-        tidx = np.argmax(sim_res[2])
-        best_weights = all_weights[tidx, :]
-        
-        col1, col2 = st.columns([3, 2])
-        with col1:
-            st.write("效率前緣分佈圖")
+        with col_main:
+            # 1. 蒙地卡羅模擬 (作為背景散佈圖)
+            num_assets = len(returns.columns)
+            sim_res = np.zeros((3, num_simulations))
+            for i in range(num_simulations):
+                w = np.random.random(num_assets)
+                w /= np.sum(w)
+                p_ret, p_std = get_portfolio_performance(w, mu, S, rf_rate)
+                sim_res[0,i] = p_std
+                sim_res[1,i] = p_ret
+                sim_res[2,i] = (p_ret - rf_rate) / p_std 
+
+            # 2. 數值最佳化求解
+            constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
+            bounds = tuple((0, 1) for _ in range(num_assets))
+            init_guess = num_assets * [1. / num_assets,]
+
+            # A. 最大夏普比率組合 (Tangency Portfolio)
+            opt_sharpe = sco.minimize(neg_sharpe_ratio, init_guess, args=(mu, S, rf_rate), 
+                                      method='SLSQP', bounds=bounds, constraints=constraints)
+            sharpe_ret, sharpe_vol = get_portfolio_performance(opt_sharpe.x, mu, S, rf_rate)
+            
+            # 將結果存回全域變數 best_weights，以便 TAB 6 & 7 使用
+            best_weights = opt_sharpe.x 
+
+            # B. 最小波動率組合 (MVP)
+            opt_vol = sco.minimize(minimize_volatility, init_guess, args=(mu, S, rf_rate), 
+                                   method='SLSQP', bounds=bounds, constraints=constraints)
+            min_vol_ret, min_vol_vol = get_portfolio_performance(opt_vol.x, mu, S, rf_rate)
+
+            # C. 繪製效率前緣曲線 (Efficient Frontier)
+            # 抓取從 MVP 到 市場最高報酬之間的目標報酬率
+            target_returns = np.linspace(min_vol_ret, max(sharpe_ret, sim_res[1].max()) * 1.02, 50)
+            frontier_vol = []
+            
+            for t_ret in target_returns:
+                cons = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                        {'type': 'eq', 'fun': lambda x: get_portfolio_performance(x, mu, S, rf_rate)[0] - t_ret})
+                res = sco.minimize(minimize_volatility, init_guess, args=(mu, S, rf_rate), 
+                                   method='SLSQP', bounds=bounds, constraints=cons)
+                if res.success:
+                    frontier_vol.append(res.fun) 
+                else:
+                    frontier_vol.append(np.nan)
+
+            # 3. 繪圖
             fig, ax = plt.subplots(figsize=(10, 6))
-            sc = ax.scatter(sim_res[1], sim_res[0], c=sim_res[2], cmap='viridis', s=10, alpha=0.5)
-            ax.scatter(sim_res[1, tidx], sim_res[0, tidx], color='red', marker='*', s=200, label='MSR')
-            ax.set_xlabel("Risk"); ax.set_ylabel("Exp. Ret.")
-            plt.colorbar(sc, label='sharp ratio')
+            
+            # (1) 隨機模擬點
+            sc = ax.scatter(sim_res[0,:], sim_res[1,:], c=sim_res[2,:], cmap='viridis', s=10, alpha=0.3, label='隨機組合')
+            plt.colorbar(sc, label='夏普比率')
+            
+            # (2) 效率前緣線
+            ax.plot(frontier_vol, target_returns, 'b--', linewidth=2, label='效率前緣')
+            
+            # (3) 個別資產點
+            asset_ret = mu * 252
+            asset_vol = np.sqrt(np.diag(S)) * np.sqrt(252)
+            ax.scatter(asset_vol, asset_ret, marker='o', color='grey', s=40, alpha=0.8, label='個別資產')
+            for i, txt in enumerate(returns.columns):
+                ax.annotate(txt, (asset_vol[i], asset_ret[i]), xytext=(5,5), textcoords='offset points', fontsize=9)
+
+            # (4) 標記關鍵組合
+            ax.scatter(min_vol_vol, min_vol_ret, marker='*', color='orange', s=250, edgecolors='black', label='最小波動 (MVP)', zorder=5)
+            ax.scatter(sharpe_vol, sharpe_ret, marker='*', color='red', s=250, edgecolors='black', label='最大夏普 (MSR)', zorder=5)
+            
+            ax.set_title("Modern Portfolio Theory: Efficient Frontier", fontsize=14)
+            ax.set_xlabel("年化波動率 (Risk)")
+            ax.set_ylabel("年化預期報酬 (Return)")
+            ax.legend(loc='best')
             st.pyplot(fig)
 
-        with col2:
-            st.write("最佳資產配置比例")
+        with col_info:
+            st.write("### 🏆 MSR 最佳權重")
             df_weights = pd.DataFrame({'資產': returns.columns, '比例': best_weights * 100})
-            df_weights = df_weights.sort_values(by='比例', ascending=False)
+            df_weights = df_weights[df_weights['比例'] > 0.01].sort_values(by='比例', ascending=False)
+            
+            # 圓餅圖
             fig_pie, ax_pie = plt.subplots()
-            ax_pie.pie(df_weights['比例'], labels=df_weights['資產'], autopct='%1.1f%%', startangle=140)
+            ax_pie.pie(df_weights['比例'], labels=df_weights['資產'], autopct='%1.1f%%', startangle=140, textprops={'fontsize': 8})
             ax_pie.axis('equal')
             st.pyplot(fig_pie)
-            st.dataframe(df_weights.style.format({'比例': '{:.2f}%'}))
+            
+            st.dataframe(df_weights.style.format({'比例': '{:.2f}%'}), use_container_width=True)
+            
+            st.metric("最佳年化報酬", f"{sharpe_ret:.2%}")
+            st.metric("最佳年化波動", f"{sharpe_vol:.2%}")
 
     # --- TAB 6 修改：僅針對 TAB5 最佳組合進行預測 ---
     with tab6:
@@ -269,5 +344,6 @@ if st.session_state.analysis_started:
                 st.table(pd.DataFrame(scene_data))
     
             st.info(f"💡 註：目前組合的加權 Beta 為 **{port_beta:.2f}**。這代表當大盤下跌 1% 時，預計你的組合會隨之變動 {abs(port_beta):.2f}%。")
+
 
 
