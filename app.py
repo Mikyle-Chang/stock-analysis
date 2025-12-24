@@ -84,7 +84,7 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
     st.success(f"✅ 成功載入 {len(df_prices.columns)} 檔資產數據！")
     st.download_button("📥 下載調整後數據 (CSV)", df_prices.to_csv().encode('utf-8'), "data.csv")
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 統計", "🔗 相關性", "💰 模擬", "📐 市場模型", "⚖️ 效率前緣", "🔮 預測"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 統計", "🔗 相關性", "💰 模擬", "📐 市場模型", "⚖️ 效率前緣", "🔮 預測", "🚨 壓力測試"])
 
     with tab1:
         st.subheader("📋 統計特徵")
@@ -207,3 +207,55 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
         # 5. 輸出組合預測基準資訊
         st.write(f"預測基準：Tab 5 計算之最佳夏普組合 (MSR)")
         st.info(f"組合年化預期報酬: {mu_p:.2%}, 年化波動率 (風險): {sigma_p:.2%}")
+        
+    # --- TAB 7: 壓力測試 ---
+        with tab7:
+            st.subheader("🚨 投資組合壓力測試 (Stress Test)")
+            
+            # 1. 計算組合的加權 Beta (反映組合對市場的敏感度)
+            # 這裡從你 TAB 4 的 beta_data 提取資料
+            if len(beta_data) > 0:
+                df_beta = pd.DataFrame(beta_data)
+                # 建立權重字典方便查詢
+                weight_dict = dict(zip(returns.columns, best_weights))
+                # 計算組合 Beta = Σ (權重 * 個股 Beta)
+                df_beta['Weighted Beta'] = df_beta.apply(lambda x: x['Beta'] * weight_dict.get(x['Asset'], 0), axis=1)
+                port_beta = df_beta['Weighted Beta'].sum()
+            else:
+                port_beta = 1.0 # 預設值
+                
+            col1, col2 = st.columns([2, 3])
+            
+            with col1:
+                st.write("**自定義市場衝擊預測**")
+                mkt_shock = st.slider("假設大盤(市場基準)下跌 (%)", -50, 0, -10)
+                
+                # 預估損失 = 本金 * 市場跌幅 * 組合 Beta
+                est_loss_pct = (mkt_shock / 100) * port_beta
+                est_loss_amt = initial_cap * est_loss_pct
+                
+                st.metric("預估組合跌幅", f"{est_loss_pct:.2%}", delta=f"{est_loss_pct:.2%}")
+                st.metric("預估損失金額", f"${est_loss_amt:,.0f}")
+                
+            with col2:
+                st.write("**歷史極端情境模擬**")
+                scenarios = {
+                    "2008 金融海嘯 (假設大盤 -20%)": -0.20,
+                    "2020 疫情崩盤 (假設大盤 -15%)": -0.15,
+                    "2022 升息縮表 (假設大盤 -10%)": -0.10,
+                    "微幅修正 (假設大盤 -5%)": -0.05
+                }
+                
+                scene_data = []
+                for name, shock in scenarios.items():
+                    loss_pct = shock * port_beta
+                    scene_data.append({
+                        "情境": name,
+                        "大盤跌幅": f"{shock:.0%}",
+                        "組合預估跌幅": f"{loss_pct:.2%}",
+                        "預估損失金額": f"${initial_cap * loss_pct:,.0f}"
+                    })
+                
+                st.table(pd.DataFrame(scene_data))
+    
+            st.info(f"💡 註：目前組合的加權 Beta 為 **{port_beta:.2f}**。這代表當大盤下跌 1% 時，預計你的組合會隨之變動 {abs(port_beta):.2f}%。")
