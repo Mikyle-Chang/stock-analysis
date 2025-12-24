@@ -223,26 +223,26 @@ if st.session_state.analysis_started:
             fig, ax = plt.subplots(figsize=(10, 6))
             
             # (1) 隨機模擬點
-            sc = ax.scatter(sim_res[0,:], sim_res[1,:], c=sim_res[2,:], cmap='viridis', s=10, alpha=0.3, label='隨機組合')
-            plt.colorbar(sc, label='夏普比率')
+            sc = ax.scatter(sim_res[0,:], sim_res[1,:], c=sim_res[2,:], cmap='viridis', s=10, alpha=0.3, label='Random Portfolios')
+            plt.colorbar(sc, label='Sharp ratio')
             
             # (2) 效率前緣線
-            ax.plot(frontier_vol, target_returns, 'b--', linewidth=2, label='效率前緣')
+            ax.plot(frontier_vol, target_returns, 'b--', linewidth=2, label='Efficient Frontier')
             
             # (3) 個別資產點
             asset_ret = mu * 252
             asset_vol = np.sqrt(np.diag(S)) * np.sqrt(252)
-            ax.scatter(asset_vol, asset_ret, marker='o', color='grey', s=40, alpha=0.8, label='個別資產')
+            ax.scatter(asset_vol, asset_ret, marker='o', color='grey', s=40, alpha=0.8, label='Individual Assets')
             for i, txt in enumerate(returns.columns):
                 ax.annotate(txt, (asset_vol[i], asset_ret[i]), xytext=(5,5), textcoords='offset points', fontsize=9)
 
             # (4) 標記關鍵組合
-            ax.scatter(min_vol_vol, min_vol_ret, marker='*', color='orange', s=250, edgecolors='black', label='最小波動 (MVP)', zorder=5)
-            ax.scatter(sharpe_vol, sharpe_ret, marker='*', color='red', s=250, edgecolors='black', label='最大夏普 (MSR)', zorder=5)
+            ax.scatter(min_vol_vol, min_vol_ret, marker='*', color='orange', s=250, edgecolors='black', label='Minimum Variance Portfolio (MVP)', zorder=5)
+            ax.scatter(sharpe_vol, sharpe_ret, marker='*', color='red', s=250, edgecolors='black', label='Maximum Sharpe Ratio (MSR)', zorder=5)
             
             ax.set_title("Modern Portfolio Theory: Efficient Frontier", fontsize=14)
-            ax.set_xlabel("年化波動率 (Risk)")
-            ax.set_ylabel("年化預期報酬 (Return)")
+            ax.set_xlabel("Annualized Volatility (Risk)")
+            ax.set_ylabel("Annualized Expected Return (Return)")
             ax.legend(loc='best')
             st.pyplot(fig)
 
@@ -344,6 +344,7 @@ if st.session_state.analysis_started:
                 st.table(pd.DataFrame(scene_data))
     
             st.info(f"💡 註：目前組合的加權 Beta 為 **{port_beta:.2f}**。這代表當大盤下跌 1% 時，預計你的組合會隨之變動 {abs(port_beta):.2f}%。")
+
 
 
 
