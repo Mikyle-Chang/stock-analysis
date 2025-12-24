@@ -257,158 +257,158 @@ with tab5:
         st.info(f"Ret: {min_vol_ret:.2%} / Vol: {min_vol_vol:.2%}")
             
 # --- TAB 6: 混合語言版 (介面優化：字體縮小 / 明確標示 MSR) ---
-    with tab6:
-        # 修改 1: 將標題改小一點 (原本是 subheader，現在改用 markdown ####)
-        st.markdown("#### 🔮 最佳投資組合未來預測 (GBM 模型)")
+with tab6:
+    # 修改 1: 將標題改小一點 (原本是 subheader，現在改用 markdown ####)
+    st.markdown("#### 🔮 最佳投資組合未來預測 (GBM 模型)")
 
-        # 1. 模擬參數設定
-        n_sim_total = 1000  # 模擬 1000 次
-        n_plot = 50         # 畫圖只畫前 50 條
+    # 1. 模擬參數設定
+    n_sim_total = 1000  # 模擬 1000 次
+    n_plot = 50         # 畫圖只畫前 50 條
+    
+    # 2. 準備組合參數 (來自 Tab 5 的最佳權重 - MSR)
+    port_returns_series = (returns * best_weights).sum(axis=1)
+    mu_p = port_returns_series.mean() * 252
+    sigma_p = port_returns_series.std() * np.sqrt(252)
+    
+    s0 = initial_cap
+    dt = 1/252
+    
+    # 3. 執行 GBM 隨機漫步模擬
+    sim_paths = np.zeros((forecast_len, n_sim_total))
+    sim_paths[0] = s0
+    
+    drift = (mu_p - 0.5 * sigma_p**2) * dt
+    shock = sigma_p * np.sqrt(dt)
+    
+    z_matrix = np.random.normal(0, 1, (forecast_len - 1, n_sim_total))
+    
+    for t in range(1, forecast_len):
+        sim_paths[t] = sim_paths[t-1] * np.exp(drift + shock * z_matrix[t-1])
         
-        # 2. 準備組合參數 (來自 Tab 5 的最佳權重 - MSR)
-        port_returns_series = (returns * best_weights).sum(axis=1)
-        mu_p = port_returns_series.mean() * 252
-        sigma_p = port_returns_series.std() * np.sqrt(252)
-        
-        s0 = initial_cap
-        dt = 1/252
-        
-        # 3. 執行 GBM 隨機漫步模擬
-        sim_paths = np.zeros((forecast_len, n_sim_total))
-        sim_paths[0] = s0
-        
-        drift = (mu_p - 0.5 * sigma_p**2) * dt
-        shock = sigma_p * np.sqrt(dt)
-        
-        z_matrix = np.random.normal(0, 1, (forecast_len - 1, n_sim_total))
-        
-        for t in range(1, forecast_len):
-            sim_paths[t] = sim_paths[t-1] * np.exp(drift + shock * z_matrix[t-1])
-            
-        # 4. 繪製路徑圖
-        st.write(f"**📈 資產路徑模擬 (顯示前 {n_plot} 條 / 共 {n_sim_total} 次)**")
-        st.line_chart(sim_paths[:, :n_plot])
-        
-        # 修改 2: 在圖表下方加入小字的說明 (Description)
-        st.markdown(f"""
-        <div style="font-size: 12px; color: #666; margin-top: -10px; margin-bottom: 20px;">
-            ℹ️ <b>模擬基準說明：</b> 此預測是基於 Tab 5 算出的 <b>「最大夏普比率組合 (Max Sharpe Ratio)」</b> 進行推估。<br>
-            參數設定：年化預期報酬 (μ) = <b>{mu_p:.2%}</b>，年化波動率 (σ) = <b>{sigma_p:.2%}</b>。
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # 5. 統計數據計算
-        final_values = sim_paths[-1, :]
-        
-        # (1) 基礎統計
-        mean_end = np.mean(final_values)
-        median_end = np.median(final_values)
-        max_profit = np.max(final_values) - s0
-        prob_profit = np.sum(final_values > s0) / n_sim_total
-        
-        # (2) 風險溢酬
-        rf_end_value = s0 * np.exp(rf_rate * (forecast_len / 252))
-        risk_premium = mean_end - rf_end_value
-        
-        # (3) 年化波動率
-        log_returns = np.log(final_values / s0)
-        realized_vol = np.std(log_returns) / np.sqrt(forecast_len / 252)
-        
-        # (4) 風險值
-        var_95 = np.percentile(final_values, 5)
-        cvar_95 = final_values[final_values <= var_95].mean()
+    # 4. 繪製路徑圖
+    st.write(f"**📈 資產路徑模擬 (顯示前 {n_plot} 條 / 共 {n_sim_total} 次)**")
+    st.line_chart(sim_paths[:, :n_plot])
+    
+    # 修改 2: 在圖表下方加入小字的說明 (Description)
+    st.markdown(f"""
+    <div style="font-size: 12px; color: #666; margin-top: -10px; margin-bottom: 20px;">
+        ℹ️ <b>模擬基準說明：</b> 此預測是基於 Tab 5 算出的 <b>「最大夏普比率組合 (Max Sharpe Ratio)」</b> 進行推估。<br>
+        參數設定：年化預期報酬 (μ) = <b>{mu_p:.2%}</b>，年化波動率 (σ) = <b>{sigma_p:.2%}</b>。
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 5. 統計數據計算
+    final_values = sim_paths[-1, :]
+    
+    # (1) 基礎統計
+    mean_end = np.mean(final_values)
+    median_end = np.median(final_values)
+    max_profit = np.max(final_values) - s0
+    prob_profit = np.sum(final_values > s0) / n_sim_total
+    
+    # (2) 風險溢酬
+    rf_end_value = s0 * np.exp(rf_rate * (forecast_len / 252))
+    risk_premium = mean_end - rf_end_value
+    
+    # (3) 年化波動率
+    log_returns = np.log(final_values / s0)
+    realized_vol = np.std(log_returns) / np.sqrt(forecast_len / 252)
+    
+    # (4) 風險值
+    var_95 = np.percentile(final_values, 5)
+    cvar_95 = final_values[final_values <= var_95].mean()
 
-        # 6. 顯示統計指標 (標題也縮小)
-        st.markdown("#### 📊 預測結果統計分析")
-        col_stat1, col_stat2, col_stat3 = st.columns(3)
-        
-        with col_stat1:
-            st.metric("平均期末資產", f"${mean_end:,.0f}", delta=f"{(mean_end/s0 -1):.2%}")
-            st.metric("中位數資產", f"${median_end:,.0f}")
-            st.metric("年化波動率", f"{realized_vol:.2%}")
+    # 6. 顯示統計指標 (標題也縮小)
+    st.markdown("#### 📊 預測結果統計分析")
+    col_stat1, col_stat2, col_stat3 = st.columns(3)
+    
+    with col_stat1:
+        st.metric("平均期末資產", f"${mean_end:,.0f}", delta=f"{(mean_end/s0 -1):.2%}")
+        st.metric("中位數資產", f"${median_end:,.0f}")
+        st.metric("年化波動率", f"{realized_vol:.2%}")
 
-        with col_stat2:
-            st.metric("正報酬機率 (>本金)", f"{prob_profit:.1%}")
-            st.metric("預期最大獲利 (淨利)", f"${max_profit:,.0f}")
-            st.metric("預期風險溢酬", f"${risk_premium:,.0f}", help=f"平均終值 - 無風險利率終值 (${rf_end_value:,.0f})")
+    with col_stat2:
+        st.metric("正報酬機率 (>本金)", f"{prob_profit:.1%}")
+        st.metric("預期最大獲利 (淨利)", f"${max_profit:,.0f}")
+        st.metric("預期風險溢酬", f"${risk_premium:,.0f}", help=f"平均終值 - 無風險利率終值 (${rf_end_value:,.0f})")
 
-        with col_stat3:
-            st.markdown("**⚠️ 下檔風險 (Tail Risk)**") # 改用 markdown 粗體取代 subheader
-            st.metric("風險值 VaR (95%)", f"${var_95:,.0f}", delta=f"{(var_95/s0 -1):.2%}", delta_color="inverse")
-            st.caption(f"條件風險值 CVaR (最差5%平均): ${cvar_95:,.0f}")
+    with col_stat3:
+        st.markdown("**⚠️ 下檔風險 (Tail Risk)**") # 改用 markdown 粗體取代 subheader
+        st.metric("風險值 VaR (95%)", f"${var_95:,.0f}", delta=f"{(var_95/s0 -1):.2%}", delta_color="inverse")
+        st.caption(f"條件風險值 CVaR (最差5%平均): ${cvar_95:,.0f}")
 
-        # 7. 分佈擬合分析
-        st.markdown("#### 📉 機率分佈擬合分析")
-        
-        dist_candidates = {
-            "Log-Normal": stats.lognorm,
-            "Gamma": stats.gamma,
-            "Student's t": stats.t,
-            "Chi-Squared": stats.chi2,
-            "Beta": stats.beta
-        }
-        
-        fit_results = []
-        
-        with st.spinner("正在計算最佳擬合模型..."):
-            for name, dist in dist_candidates.items():
-                try:
-                    params = dist.fit(final_values)
-                    D, p = stats.kstest(final_values, dist.cdf, args=params)
-                    fit_results.append({
-                        "Distribution": name,
-                        "D_Statistic": D,
-                        "p_value": p,
-                        "params": params,
-                        "model": dist
-                    })
-                except:
-                    continue
-
-        fit_results.sort(key=lambda x: x['D_Statistic'])
-        best_fit = fit_results[0]
-        
-        col_plot, col_rank = st.columns([3, 1])
-        
-        with col_plot:
-            fig_hist, ax_hist = plt.subplots(figsize=(10, 6))
-            
-            ax_hist.hist(final_values, bins=60, density=True, alpha=0.5, color='lightgray', label='Simulated Data', edgecolor='white')
-            
-            x_fit = np.linspace(np.min(final_values), np.max(final_values), 200)
-            winner_model = best_fit['model']
-            winner_params = best_fit['params']
-            pdf_fit = winner_model.pdf(x_fit, *winner_params)
-            
-            ax_hist.plot(x_fit, pdf_fit, 'r-', lw=3, label=f"Best Fit: {best_fit['Distribution']}")
-            
-            ax_hist.axvline(s0, color='black', linestyle='--', linewidth=1, label='Initial Capital')
-            ax_hist.axvline(mean_end, color='blue', linestyle=':', linewidth=1.5, label='Mean Value')
-
-            ax_hist.set_title(f"Forecast Distribution & Best Fit Model ({forecast_len} Days)")
-            ax_hist.set_xlabel("Portfolio Value ($)")
-            ax_hist.set_ylabel("Probability Density")
-            ax_hist.legend()
-            
-            import matplotlib.ticker as mticker
-            ax_hist.xaxis.set_major_formatter(mticker.StrMethodFormatter('${x:,.0f}'))
-            
-            st.pyplot(fig_hist)
-            
-        with col_rank:
-            st.markdown("**🏆 擬合準確度排名**")
-            st.caption("KS 統計量 (越低越準)")
-            
-            rank_data = []
-            for res in fit_results:
-                rank_data.append({
-                    "分佈模型": res['Distribution'],
-                    "KS 差異值 (D)": f"{res['D_Statistic']:.4f}"
+    # 7. 分佈擬合分析
+    st.markdown("#### 📉 機率分佈擬合分析")
+    
+    dist_candidates = {
+        "Log-Normal": stats.lognorm,
+        "Gamma": stats.gamma,
+        "Student's t": stats.t,
+        "Chi-Squared": stats.chi2,
+        "Beta": stats.beta
+    }
+    
+    fit_results = []
+    
+    with st.spinner("正在計算最佳擬合模型..."):
+        for name, dist in dist_candidates.items():
+            try:
+                params = dist.fit(final_values)
+                D, p = stats.kstest(final_values, dist.cdf, args=params)
+                fit_results.append({
+                    "Distribution": name,
+                    "D_Statistic": D,
+                    "p_value": p,
+                    "params": params,
+                    "model": dist
                 })
-            st.dataframe(pd.DataFrame(rank_data), hide_index=True)
-            
-            # 修改 3: 最後的總結也改用小字 caption
-            st.caption(f"✅ 經統計檢定，最佳擬合模型為： **{best_fit['Distribution']}**")        
+            except:
+                continue
+
+    fit_results.sort(key=lambda x: x['D_Statistic'])
+    best_fit = fit_results[0]
+    
+    col_plot, col_rank = st.columns([3, 1])
+    
+    with col_plot:
+        fig_hist, ax_hist = plt.subplots(figsize=(10, 6))
+        
+        ax_hist.hist(final_values, bins=60, density=True, alpha=0.5, color='lightgray', label='Simulated Data', edgecolor='white')
+        
+        x_fit = np.linspace(np.min(final_values), np.max(final_values), 200)
+        winner_model = best_fit['model']
+        winner_params = best_fit['params']
+        pdf_fit = winner_model.pdf(x_fit, *winner_params)
+        
+        ax_hist.plot(x_fit, pdf_fit, 'r-', lw=3, label=f"Best Fit: {best_fit['Distribution']}")
+        
+        ax_hist.axvline(s0, color='black', linestyle='--', linewidth=1, label='Initial Capital')
+        ax_hist.axvline(mean_end, color='blue', linestyle=':', linewidth=1.5, label='Mean Value')
+
+        ax_hist.set_title(f"Forecast Distribution & Best Fit Model ({forecast_len} Days)")
+        ax_hist.set_xlabel("Portfolio Value ($)")
+        ax_hist.set_ylabel("Probability Density")
+        ax_hist.legend()
+        
+        import matplotlib.ticker as mticker
+        ax_hist.xaxis.set_major_formatter(mticker.StrMethodFormatter('${x:,.0f}'))
+        
+        st.pyplot(fig_hist)
+        
+    with col_rank:
+        st.markdown("**🏆 擬合準確度排名**")
+        st.caption("KS 統計量 (越低越準)")
+        
+        rank_data = []
+        for res in fit_results:
+            rank_data.append({
+                "分佈模型": res['Distribution'],
+                "KS 差異值 (D)": f"{res['D_Statistic']:.4f}"
+            })
+        st.dataframe(pd.DataFrame(rank_data), hide_index=True)
+        
+        # 修改 3: 最後的總結也改用小字 caption
+        st.caption(f"✅ 經統計檢定，最佳擬合模型為： **{best_fit['Distribution']}**")        
         # --- TAB 7: 壓力測試 ---
         with tab7:
             st.subheader("🚨 投資組合壓力測試 (Stress Test)")
@@ -460,6 +460,7 @@ with tab5:
                 st.table(pd.DataFrame(scene_data))
     
             st.info(f"💡 註：目前組合的加權 Beta 為 **{port_beta:.2f}**。這代表當大盤下跌 1% 時，預計你的組合會隨之變動 {abs(port_beta):.2f}%。")
+
 
 
 
