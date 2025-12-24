@@ -94,7 +94,7 @@ if st.session_state.analysis_started:
     st.success(f"✅ 成功載入 {len(df_prices.columns)} 檔資產數據！")
     st.download_button("📥 下載調整後數據 (CSV)", df_prices.to_csv().encode('utf-8'), "data.csv")
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📊 統計", "🔗 相關性", "💰 模擬", "📐 市場模型", "⚖️ 效率前緣", "🔮 預測", "🚨 (黑天鵝)壓力測試"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(["📊 統計", "🔗 相關性", "💰 模擬", "📐 市場模型", "⚖️ 效率前緣", "🔮 預測", "🚨 (黑天鵝)壓力測試","🧬 PRO 最佳化分析"])
 
     with tab1:
         st.subheader("📋 統計特徵")
@@ -270,4 +270,40 @@ if st.session_state.analysis_started:
     
             st.info(f"💡 註：目前組合的加權 Beta 為 **{port_beta:.2f}**。這代表當大盤下跌 1% 時，預計你的組合會隨之變動 {abs(port_beta):.2f}%。")
 
+# --- TAB 8: 新增 PRO 功能 (數值最佳化) ---
+    with tab8:
+        st.subheader("🧬 PRO 最佳化分析 (Scipy 精確求解)")
+        st.info("此標籤頁使用 Scipy 最佳化算法尋找理論上的最佳配置，並與蒙地卡羅模擬進行比對。")
+        
+        num_assets = len(returns.columns)
+        constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
+        bounds = tuple((0, 1) for _ in range(num_assets))
+        init_guess = num_assets * [1. / num_assets,]
+
+        # 數值求解
+        opt_sharpe = sco.minimize(neg_sharpe_ratio, init_guess, args=(mu, S, rf_rate), method='SLSQP', bounds=bounds, constraints=constraints)
+        pro_weights = opt_sharpe.x
+        pro_ret, pro_vol = get_portfolio_performance(pro_weights, mu, S, rf_rate)
+
+        col_pro1, col_pro2 = st.columns([3, 2])
+        with col_pro1:
+            fig_pro, ax_pro = plt.subplots(figsize=(10, 6))
+            ax_pro.scatter(sim_res[1], sim_res[0], c=sim_res[2], cmap='viridis', s=10, alpha=0.2, label='Random Sim')
+            ax_pro.scatter(pro_vol, pro_ret, color='purple', marker='*', s=300, label='Math Optimal (MSR)')
+            
+            # 資本市場線
+            cml_x = np.linspace(0, sim_res[1].max(), 100)
+            cml_y = rf_rate + ((pro_ret - rf_rate) / pro_vol) * cml_x
+            ax_pro.plot(cml_x, cml_y, 'g--', label='CML')
+            
+            ax_pro.set_xlabel("Risk (Std)"); ax_pro.set_ylabel("Return"); ax_pro.legend()
+            ax_pro.xaxis.set_major_formatter(mtick.PercentFormatter(1.0))
+            ax_pro.yaxis.set_major_formatter(mtick.PercentFormatter(1.0))
+            st.pyplot(fig_pro)
+
+        with col_pro2:
+            st.write("### 🧬 數學最佳權重")
+            df_pro = pd.DataFrame({'資產': returns.columns, '精確比例': pro_weights * 100}).sort_values('精確比例', ascending=False)
+            st.dataframe(df_pro.style.format({'精確比例': '{:.2f}%'}))
+            st.metric("理論最高夏普", f"{(pro_ret - rf_rate)/pro_vol:.2f}")
 
