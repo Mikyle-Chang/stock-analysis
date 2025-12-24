@@ -67,7 +67,17 @@ with st.sidebar:
     forecast_len = st.slider('預測天數', 30, 365, 180)
 
 # --- 5. 主程式執行 ---
+
+# 1. 初始化 Session State 狀態（防止拉桿觸發重新整理導致畫面消失）
+if 'analysis_started' not in st.session_state:
+    st.session_state.analysis_started = False
+
+# 2. 點擊按鈕後，將狀態設為 True
 if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
+    st.session_state.analysis_started = True
+
+# 3. 根據狀態決定是否顯示分析內容
+if st.session_state.analysis_started:
     tw_list = [x.strip() for x in tw_in.split(',') if x.strip()]
     us_list = [x.strip().upper() for x in us_in.split(',') if x.strip()]
     
@@ -259,4 +269,5 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
                 st.table(pd.DataFrame(scene_data))
     
             st.info(f"💡 註：目前組合的加權 Beta 為 **{port_beta:.2f}**。這代表當大盤下跌 1% 時，預計你的組合會隨之變動 {abs(port_beta):.2f}%。")
+
 
