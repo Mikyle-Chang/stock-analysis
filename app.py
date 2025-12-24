@@ -282,73 +282,118 @@ if st.session_state.analysis_started:
     
             st.info(f"💡 註：目前組合的加權 Beta 為 **{port_beta:.2f}**。這代表當大盤下跌 1% 時，預計你的組合會隨之變動 {abs(port_beta):.2f}%。")
 
-with tab8:
-        st.subheader("🧬 PRO 最佳化分析 (Scipy 精確求解)")
-        st.info("此標籤頁使用 Scipy 最佳化算法尋找理論上的最佳配置，並與蒙地卡羅模擬進行比對。")
+
+    with tab8:
+        st.subheader("⚖️ 效率前緣與最佳配置 (Scipy Optimize)")
         
-        # 1. 定義必要變數
-        mu = returns.mean() * 252
-        S = returns.cov() * 252
-        num_assets = len(returns.columns)
+        col_main, col_info = st.columns([3, 1])
         
-        # 2. 設定最佳化約束條件
-        # 'eq' 代表相等於 0，即所有權重和減 1 等於 0
-        constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
-        # 設定權重邊界 (0% ~ 100%)
-        bounds = tuple((0, 1) for _ in range(num_assets))
-        # 初始猜測值 (平均分配)
-        init_guess = num_assets * [1. / num_assets,]
+        with col_main:
+            # 1. 蒙地卡羅模擬 (背景雲)
+            num_assets = len(returns.columns)
+            sim_res = np.zeros((3, num_simulations))
+            for i in range(num_simulations):
+                weights = np.random.random(num_assets)
+                weights /= np.sum(weights)
+                p_ret, p_std = get_portfolio_performance(weights, mu, S, rf_rate)
+                sim_res[0,i] = p_std
+                sim_res[1,i] = p_ret
+                sim_res[2,i] = (p_ret - rf_rate) / p_std 
 
-        # 3. 執行數值求解 (SLSQP 演算法)
-        try:
-            opt_sharpe = sco.minimize(
-                neg_sharpe_ratio, 
-                init_guess, 
-                args=(mu, S, rf_rate), 
-                method='SLSQP', 
-                bounds=bounds, 
-                constraints=constraints
-            )
+            # 2. 數值最佳化求解
+            constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
+            bounds = tuple((0, 1) for _ in range(num_assets))
+            init_guess = num_assets * [1. / num_assets,]
+
+            # A. 最大夏普比率組合 (Tangency Portfolio)
+            opt_sharpe = sco.minimize(neg_sharpe_ratio, init_guess, args=(mu, S, rf_rate), 
+                                      method='SLSQP', bounds=bounds, constraints=constraints)
+            sharpe_ret, sharpe_vol = get_portfolio_performance(opt_sharpe.x, mu, S, rf_rate)
+            best_weights_global = opt_sharpe.x # 更新全域變數
+
+            # B. 最小波動率組合 (MVP)
+            opt_vol = sco.minimize(minimize_volatility, init_guess, args=(mu, S, rf_rate), 
+                                   method='SLSQP', bounds=bounds, constraints=constraints)
+            min_vol_ret, min_vol_vol = get_portfolio_performance(opt_vol.x, mu, S, rf_rate)
+
+            # C. 繪製效率前緣曲線 (Efficient Frontier)
+            target_returns = np.linspace(min_vol_ret, max(sharpe_ret, sim_res[1].max()) * 1.05, 50)
+            frontier_vol = []
             
-            if not opt_sharpe.success:
-                st.error("最佳化求解失敗，請檢查數據完整性。")
-                st.stop()
+            for t_ret in target_returns:
+                cons = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                        {'type': 'eq', 'fun': lambda x: get_portfolio_performance(x, mu, S, rf_rate)[0] - t_ret})
+                res = sco.minimize(minimize_volatility, init_guess, args=(mu, S, rf_rate), 
+                                   method='SLSQP', bounds=bounds, constraints=cons)
+                if res.success:
+                    frontier_vol.append(res.fun) 
+                else:
+                    frontier_vol.append(np.nan)
 
-            pro_weights = opt_sharpe.x
-            pro_ret, pro_vol = get_portfolio_performance(pro_weights, mu, S, rf_rate)
-
-            # 4. 繪製視覺化圖表
-            col_pro1, col_pro2 = st.columns([3, 2])
+            # 3. 繪圖
+            fig, ax = plt.subplots(figsize=(10, 6))
             
-            with col_pro1:
-                fig_pro, ax_pro = plt.subplots(figsize=(10, 6))
-                # 繪製蒙地卡羅點 (淡化作為背景)
-                sc = ax_pro.scatter(sim_res[1], sim_res[0], c=sim_res[2], cmap='viridis', s=10, alpha=0.15, label='Random Sim')
-                # 繪製數學最佳解點
-                ax_pro.scatter(pro_vol, pro_ret, color='purple', marker='*', s=300, label='Math Optimal (MSR)', edgecolors='white')
-                
-                # 資本市場線 (CML): 從無風險利率出發經過最佳點的射線
-                cml_x = np.linspace(0, sim_res[1].max(), 100)
-                cml_y = rf_rate + ((pro_ret - rf_rate) / pro_vol) * cml_x
-                ax_pro.plot(cml_x, cml_y, color='green', linestyle='--', linewidth=2, label='Capital Market Line')
-                
-                ax_pro.set_xlabel("Annualized Volatility (Risk)"); ax_pro.set_ylabel("Annualized Expected Return")
-                ax_pro.legend()
-                ax_pro.xaxis.set_major_formatter(mtick.PercentFormatter(1.0))
-                ax_pro.yaxis.set_major_formatter(mtick.PercentFormatter(1.0))
-                st.pyplot(fig_pro)
+            # (1) 隨機模擬點
+            sc = ax.scatter(sim_res[0,:], sim_res[1,:], c=sim_res[2,:], cmap='viridis', s=10, alpha=0.3, label='Random Portfolios')
+            plt.colorbar(sc, label='Sharpe Ratio')
+            
+            # (2) 效率前緣線
+            ax.plot(frontier_vol, target_returns, 'b-', linewidth=2.5, label='Efficient Frontier')
+            
+            # (3) 個別資產點
+            asset_ret = mu * 252
+            asset_vol = np.sqrt(np.diag(S)) * np.sqrt(252)
+            ax.scatter(asset_vol, asset_ret, marker='o', color='grey', s=50, label='Assets')
+            for i, txt in enumerate(returns.columns):
+                ax.annotate(txt, (asset_vol[i], asset_ret[i]), xytext=(5,0), textcoords='offset points')
 
-            with col_pro2:
-                st.write("### 🧬 數學最佳權重")
-                df_pro = pd.DataFrame({'資產': returns.columns, '精確比例': pro_weights * 100})
-                df_pro = df_pro.sort_values('精確比例', ascending=False)
-                
-                st.metric("理論最高夏普比率", f"{(pro_ret - rf_rate)/pro_vol:.3f}")
-                st.metric("預期年化報酬", f"{pro_ret:.2%}")
-                st.metric("預期年化波動", f"{pro_vol:.2%}")
-                
-                st.dataframe(df_pro.style.format({'精確比例': '{:.2f}%'}), use_container_width=True)
-                
-        except Exception as e:
-            st.error(f"計算過程中發生錯誤: {e}")
+            # (4) 標記關鍵組合
+            ax.scatter(min_vol_vol, min_vol_ret, marker='*', color='orange', s=250, edgecolors='black', label='Min Volatility (MVP)')
+            ax.scatter(sharpe_vol, sharpe_ret, marker='*', color='purple', s=250, edgecolors='black', label='Max Sharpe (Tangency)')
+
+            # (5) 資本市場線 (CML)
+            cml_x = np.linspace(0, max(sim_res[0].max(), sharpe_vol)*1.2, 100)
+            cml_slope = (sharpe_ret - rf_rate) / sharpe_vol
+            cml_y = rf_rate + cml_slope * cml_x
+            ax.plot(cml_x, cml_y, 'g--', label='Capital Market Line (CML)', alpha=0.7)
+
+            # --- 修改處 1: 標題改英文 + Rf 小數點 3 位 ---
+            ax.set_title(f'Efficient Frontier & Optimal Portfolios (Rf={rf_rate*100:.3f}%)')
+            ax.set_xlabel('Annualized Volatility (Risk)')
+            ax.set_ylabel('Annualized Expected Return')
+            ax.xaxis.set_major_formatter(mtick.PercentFormatter(1.0))
+            ax.yaxis.set_major_formatter(mtick.PercentFormatter(1.0))
+            ax.set_xlim(left=0)
+            ax.legend(loc='best')
+            
+            st.pyplot(fig)
+
+        with col_info:
+            # --- Max Sharpe 區塊 ---
+            st.write("### 🏆 最大夏普配置")
+            df_sharpe = pd.DataFrame({'資產': returns.columns, '比例': best_weights_global * 100})
+            df_sharpe = df_sharpe.sort_values(by='比例', ascending=False)
+            
+            fig_pie1, ax_pie1 = plt.subplots(figsize=(4, 4))
+            ax_pie1.pie(df_sharpe['比例'], labels=df_sharpe['資產'], autopct='%1.1f%%', startangle=90)
+            st.pyplot(fig_pie1)
+            
+            st.dataframe(df_sharpe.style.format({'比例': '{:.2f}%'}), hide_index=True)
+            st.caption(f"回報: {sharpe_ret:.2%} / 風險: {sharpe_vol:.2%}")
+            
+            st.markdown("---")
+            
+            # --- 修改處 2: 新增 MVP 圓餅圖區塊 ---
+            st.write("### 🛡️ 最小波動配置 (MVP)")
+            # 使用 opt_vol.x 抓取 MVP 的權重
+            df_mvp = pd.DataFrame({'資產': returns.columns, '比例': opt_vol.x * 100})
+            df_mvp = df_mvp.sort_values(by='比例', ascending=False)
+            
+            fig_pie2, ax_pie2 = plt.subplots(figsize=(4, 4))
+            ax_pie2.pie(df_mvp['比例'], labels=df_mvp['資產'], autopct='%1.1f%%', startangle=90)
+            st.pyplot(fig_pie2)
+            
+            st.dataframe(df_mvp.style.format({'比例': '{:.2f}%'}), hide_index=True)
+            st.caption(f"回報: {min_vol_ret:.2%} / 風險: {min_vol_vol:.2%}")
+
 
