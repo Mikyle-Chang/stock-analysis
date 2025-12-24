@@ -94,7 +94,7 @@ if st.session_state.analysis_started:
     st.success(f"✅ 成功載入 {len(df_prices.columns)} 檔資產數據！")
     st.download_button("📥 下載調整後數據 (CSV)", df_prices.to_csv().encode('utf-8'), "data.csv")
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📊 統計", "🔗 相關性", "💰 模擬", "📐 市場模型", "⚖️ 效率前緣", "🔮 預測", "🚨 (黑天鵝)壓力測試"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📊 統計", "🔗 相關性", "💰 模擬", "📐 市場模型", "⚖️ 效率前緣", "🔮 預測", "🚨 壓力測試"])
 
     with tab1:
         st.subheader("📋 統計特徵")
@@ -149,110 +149,43 @@ if st.session_state.analysis_started:
                 beta_data.append({"Asset": s, "Benchmark": mkt_ref, "Beta": slope, "R2": r_val**2})
         st.table(pd.DataFrame(beta_data))
 
-    # --- 重頭戲：修改後的 Tab 5 ---
     with tab5:
-        st.subheader("⚖️ 效率前緣與最佳配置 (Scipy Optimize)")
+        st.subheader("⚖️ 最佳投資組合配置")
+        r_mean = returns.mean() * 252
+        r_cov = returns.cov() * 252
+        sim_res = np.zeros((3, num_simulations))
+        all_weights = np.zeros((num_simulations, len(returns.columns)))
         
-        col_main, col_info = st.columns([3, 1])
+        for i in range(num_simulations):
+            w = np.random.random(len(returns.columns))
+            w /= w.sum()
+            all_weights[i, 🙂 = w
+            p_r = np.sum(w * r_mean)
+            p_v = np.sqrt(np.dot(w.T, np.dot(r_cov, w)))
+            sim_res[:, i] = [p_r, p_v, (p_r - rf_rate) / p_v]
         
-        with col_main:
-            # 1. 蒙地卡羅模擬 (作為背景雲)
-            num_assets = len(returns.columns)
-            sim_res = np.zeros((3, num_simulations))
-            for i in range(num_simulations):
-                weights = np.random.random(num_assets)
-                weights /= np.sum(weights)
-                p_ret, p_std = get_portfolio_performance(weights, mu, S, rf_rate)
-                sim_res[0,i] = p_std
-                sim_res[1,i] = p_ret
-                sim_res[2,i] = (p_ret - rf_rate) / p_std # Sharpe
-
-            # 2. 數值最佳化求解 (SLSQP)
-            constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
-            bounds = tuple((0, 1) for _ in range(num_assets))
-            init_guess = num_assets * [1. / num_assets,]
-
-            # A. 最大夏普比率組合 (Tangency Portfolio)
-            opt_sharpe = sco.minimize(neg_sharpe_ratio, init_guess, args=(mu, S, rf_rate), 
-                                      method='SLSQP', bounds=bounds, constraints=constraints)
-            sharpe_ret, sharpe_vol = get_portfolio_performance(opt_sharpe.x, mu, S, rf_rate)
-            best_weights_global = opt_sharpe.x # 更新全域最佳權重供後續使用
-
-            # B. 最小波動率組合 (MVP)
-            opt_vol = sco.minimize(minimize_volatility, init_guess, args=(mu, S, rf_rate), 
-                                   method='SLSQP', bounds=bounds, constraints=constraints)
-            min_vol_ret, min_vol_vol = get_portfolio_performance(opt_vol.x, mu, S, rf_rate)
-
-            # C. 繪製效率前緣曲線 (Efficient Frontier)
-            target_returns = np.linspace(min_vol_ret, max(sharpe_ret, sim_res[1].max()) * 1.05, 50)
-            frontier_vol = []
-            
-            for t_ret in target_returns:
-                cons = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
-                        {'type': 'eq', 'fun': lambda x: get_portfolio_performance(x, mu, S, rf_rate)[0] - t_ret})
-                res = sco.minimize(minimize_volatility, init_guess, args=(mu, S, rf_rate), 
-                                   method='SLSQP', bounds=bounds, constraints=cons)
-                if res.success:
-                    frontier_vol.append(res.fun) # res.fun is volatility here
-                else:
-                    frontier_vol.append(np.nan)
-
-            # 3. 繪圖
+        tidx = np.argmax(sim_res[2])
+        best_weights = all_weights[tidx, 🙂
+        
+        col1, col2 = st.columns([3, 2])
+        with col1:
+            st.write("效率前緣分佈圖")
             fig, ax = plt.subplots(figsize=(10, 6))
-            
-            # (1) 隨機模擬點 (背景)
-            sc = ax.scatter(sim_res[0,:], sim_res[1,:], c=sim_res[2,:], cmap='viridis', s=10, alpha=0.3, label='Random Portfolios')
-            plt.colorbar(sc, label='Sharpe Ratio')
-            
-            # (2) 效率前緣線
-            ax.plot(frontier_vol, target_returns, 'b-', linewidth=2.5, label='Efficient Frontier')
-            
-            # (3) 個別資產點
-            asset_ret = mu * 252
-            asset_vol = np.sqrt(np.diag(S)) * np.sqrt(252)
-            ax.scatter(asset_vol, asset_ret, marker='o', color='grey', s=50, label='Assets')
-            for i, txt in enumerate(returns.columns):
-                ax.annotate(txt, (asset_vol[i], asset_ret[i]), xytext=(5,0), textcoords='offset points')
-
-            # (4) 標記關鍵組合
-            # MVP
-            ax.scatter(min_vol_vol, min_vol_ret, marker='*', color='orange', s=250, edgecolors='black', label='Min Volatility (MVP)')
-            # Max Sharpe
-            ax.scatter(sharpe_vol, sharpe_ret, marker='*', color='purple', s=250, edgecolors='black', label='Max Sharpe (Tangency)')
-
-            # (5) 資本市場線 (CML)
-            cml_x = np.linspace(0, max(sim_res[0].max(), sharpe_vol)*1.2, 100)
-            cml_slope = (sharpe_ret - rf_rate) / sharpe_vol
-            cml_y = rf_rate + cml_slope * cml_x
-            ax.plot(cml_x, cml_y, 'g--', label='Capital Market Line (CML)', alpha=0.7)
-
-            # 設定座標軸格式
-            ax.set_title(f'效率前緣與最佳配置 (Rf={rf_rate*100}%)')
-            ax.set_xlabel('Annualized Volatility (Risk)')
-            ax.set_ylabel('Annualized Expected Return')
-            ax.xaxis.set_major_formatter(mtick.PercentFormatter(1.0))
-            ax.yaxis.set_major_formatter(mtick.PercentFormatter(1.0))
-            ax.set_xlim(left=0)
-            ax.legend(loc='best')
-            
+            sc = ax.scatter(sim_res[1], sim_res[0], c=sim_res[2], cmap='viridis', s=10, alpha=0.5)
+            ax.scatter(sim_res[1, tidx], sim_res[0, tidx], color='red', marker='*', s=200, label='MSR')
+            ax.set_xlabel("Risk"); ax.set_ylabel("Exp. Ret.")
+            plt.colorbar(sc, label='sharp ratio')
             st.pyplot(fig)
 
-        with col_info:
-            st.write("### 🏆 最佳配置 (Max Sharpe)")
-            df_weights = pd.DataFrame({'資產': returns.columns, '比例': best_weights_global * 100})
+        with col2:
+            st.write("最佳資產配置比例")
+            df_weights = pd.DataFrame({'資產': returns.columns, '比例': best_weights * 100})
             df_weights = df_weights.sort_values(by='比例', ascending=False)
-            
-            # 圓餅圖
-            fig_pie, ax_pie = plt.subplots(figsize=(4, 4))
-            ax_pie.pie(df_weights['比例'], labels=df_weights['資產'], autopct='%1.1f%%', startangle=90)
+            fig_pie, ax_pie = plt.subplots()
+            ax_pie.pie(df_weights['比例'], labels=df_weights['資產'], autopct='%1.1f%%', startangle=140)
+            ax_pie.axis('equal')
             st.pyplot(fig_pie)
-            
-            st.dataframe(df_weights.style.format({'比例': '{:.2f}%'}), hide_index=True)
-            
-            st.markdown("---")
-            st.metric("預期年化報酬", f"{sharpe_ret:.2%}")
-            st.metric("預期年化波動", f"{sharpe_vol:.2%}")
-            st.metric("夏普比率", f"{(sharpe_ret - rf_rate)/sharpe_vol:.2f}")
+            st.dataframe(df_weights.style.format({'比例': '{:.2f}%'}))
 
     # --- TAB 6 修改：僅針對 TAB5 最佳組合進行預測 ---
     with tab6:
@@ -304,7 +237,7 @@ if st.session_state.analysis_started:
             col1, col2 = st.columns([2, 3])
             
             with col1:
-                st.write("**自定義市場衝擊預測**")
+                st.write("*自定義市場衝擊預測*")
                 mkt_shock = st.slider("假設大盤(市場基準)下跌 (%)", -50, 0, -10)
                 
                 # 預估損失 = 本金 * 市場跌幅 * 組合 Beta
@@ -315,7 +248,7 @@ if st.session_state.analysis_started:
                 st.metric("預估損失金額", f"${est_loss_amt:,.0f}")
                 
             with col2:
-                st.write("**歷史極端情境模擬**")
+                st.write("*歷史極端情境模擬*")
                 scenarios = {
                     "2008 金融海嘯 (假設大盤 -20%)": -0.20,
                     "2020 疫情崩盤 (假設大盤 -15%)": -0.15,
@@ -336,7 +269,3 @@ if st.session_state.analysis_started:
                 st.table(pd.DataFrame(scene_data))
     
             st.info(f"💡 註：目前組合的加權 Beta 為 **{port_beta:.2f}**。這代表當大盤下跌 1% 時，預計你的組合會隨之變動 {abs(port_beta):.2f}%。")
-
-
-
-
