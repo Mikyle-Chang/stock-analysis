@@ -86,7 +86,7 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 統計", "🔗 相關性", "💰 模擬", "📐 市場模型", "⚖️ 效率前緣", "🔮 預測"])
 
     with tab1:
-            st.subheader("📋 統計特特征")
+            st.subheader("📋 統計特徵")
             res_df = pd.DataFrame(index=returns.columns)
             total_days = (df_prices.index[-1] - df_prices.index[0]).days
             years = max(total_days / 365.25, 0.1) # 避免除以零
@@ -212,6 +212,7 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
             sim_paths[t] = sim_paths[t-1] * np.exp(drift + shock * z)
             
         st.line_chart(sim_paths)
+
 
 
 
