@@ -25,9 +25,9 @@ def calculate_mdd(series):
 @st.cache_data(ttl=3600)
 def fetch_stock_data(tickers_tw, tickers_us, start, end):
     data_dict = {}
+    # 確保台股基準 0050 與美股基準 SPY 都會被抓取
     unique_tw = list(set(tickers_tw + ['0050']))
-    # 這裡確保如果輸入美股，SPY 也會被抓取作為基準
-    unique_us = list(set(tickers_us + (['SPY'] if tickers_us else [])))
+    unique_us = list(set(tickers_us + ['SPY']))
     
     for s in unique_tw:
         if not s: continue
@@ -76,7 +76,7 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
         raw_data = fetch_stock_data(tw_list, us_list, start_date, end_date)
         
         if not raw_data:
-            st.error("❌ 所有來源均連線失敗。請嘗試更換日期範圍或稍後再試。")
+            st.error("❌ 所有來源均連線失敗。")
             st.stop()
             
         df_prices = pd.DataFrame(raw_data).ffill().dropna()
@@ -98,12 +98,7 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
         res_df['夏普比率'] = (res_df['年化報酬'] - rf_rate) / res_df['年化波動']
         res_df['最大回撤'] = [calculate_mdd(df_prices[c])[0] for c in df_prices.columns]
         
-        normality_results = []
-        for col in returns.columns:
-            _, p_val = stats.jarque_bera(returns[col])
-            normality_results.append("✅ 是" if p_val > 0.05 else "❌ 否")
-        
-        res_df['符合常態'] = normality_results
+        res_df['符合常態'] = [("✅ 是" if stats.jarque_bera(returns[c])[1] > 0.05 else "❌ 否") for c in returns.columns]
         
         numeric_cols = ['年化報酬', '年化波動', '夏普比率', '最大回撤']
         st.dataframe(res_df.style.format({c: "{:.2%}" for c in numeric_cols}), use_container_width=True)
@@ -133,36 +128,37 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
     with tab4:
         st.subheader("📐 市場模型 (Beta)")
         
-        # --- 修改部分：根據輸入決定基準環境 ---
-        if tw_list and '0050' in returns.columns:
-            mkt = '0050'
-        elif us_list and 'SPY' in returns.columns:
-            mkt = 'SPY'
-        else:
-            mkt = returns.columns[0]
-            
-        st.caption(f"目前使用的市場基準: {mkt}")
-            
         beta_data = []
-        for s in [c for c in returns.columns if c != mkt]:
-            common_df = pd.concat([returns[mkt], returns[s]], axis=1).dropna()
+        # 遍歷所有資產，排除基準標的本身
+        for s in [c for c in returns.columns if c not in ['0050', 'SPY']]:
+            # --- 核心修改：判斷資產類型選擇基準 ---
+            if s.isdigit() and '0050' in returns.columns:
+                mkt_ref = '0050' # 台股用 0050
+            elif not s.isdigit() and 'SPY' in returns.columns:
+                mkt_ref = 'SPY'  # 美股用 SPY
+            else:
+                continue
+                
+            # 針對該資產與其對應基準進行日期對齊
+            common_df = pd.concat([returns[mkt_ref], returns[s]], axis=1).dropna()
+            
             if len(common_df) > 10:
                 slope, _, r_val, _, _ = stats.linregress(common_df.iloc[:,0], common_df.iloc[:,1])
-                beta_data.append({"Asset": s, "Beta": slope, "R2": r_val**2})
+                beta_data.append({"Asset": s, "Benchmark": mkt_ref, "Beta": slope, "R2": r_val**2})
+        
         st.table(pd.DataFrame(beta_data))
 
     with tab5:
         st.subheader("⚖️ 最佳投資組合配置")
         r_mean = returns.mean() * 252
         r_cov = returns.cov() * 252
-        
         sim_res = np.zeros((3, num_simulations))
         all_weights = np.zeros((num_simulations, len(returns.columns)))
         
         for i in range(num_simulations):
             w = np.random.random(len(returns.columns))
             w /= w.sum()
-            all_weights[i, :] = w 
+            all_weights[i, :] = w
             p_r = np.sum(w * r_mean)
             p_v = np.sqrt(np.dot(w.T, np.dot(r_cov, w)))
             sim_res[:, i] = [p_r, p_v, (p_r - rf_rate) / p_v]
@@ -184,7 +180,6 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
             st.write("最佳資產配置比例")
             df_weights = pd.DataFrame({'資產': returns.columns, '比例': best_weights * 100})
             df_weights = df_weights.sort_values(by='比例', ascending=False)
-            
             fig_pie, ax_pie = plt.subplots()
             ax_pie.pie(df_weights['比例'], labels=df_weights['資產'], autopct='%1.1f%%', startangle=140)
             ax_pie.axis('equal')
@@ -194,20 +189,13 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
     with tab6:
         st.subheader("🔮 股價未來模擬 (GBM)")
         tgt = st.selectbox("標的", returns.columns)
-        
-        s0 = df_prices[tgt].iloc[-1]
-        mu = returns[tgt].mean() * 252
-        sigma = returns[tgt].std() * np.sqrt(252)
+        s0, mu, sigma = df_prices[tgt].iloc[-1], returns[tgt].mean() * 252, returns[tgt].std() * np.sqrt(252)
         dt = 1/252
-        
         sim_paths = np.zeros((forecast_len, 50))
         sim_paths[0] = s0
-        
         drift = (mu - 0.5 * sigma**2) * dt
         shock = sigma * np.sqrt(dt)
-        
         for t in range(1, forecast_len):
             z = np.random.normal(0, 1, 50)
             sim_paths[t] = sim_paths[t-1] * np.exp(drift + shock * z)
-            
         st.line_chart(sim_paths)
