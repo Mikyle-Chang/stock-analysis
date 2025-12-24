@@ -151,6 +151,7 @@ if st.session_state.analysis_started:
 
 # --- 在 tab5 之前先準備好最佳化所需的數據與函數 ---
     import scipy.optimize as sco
+    import matplotlib.ticker as mtick # 引入百分比格式化工具
 
     # 1. 計算日均報酬與共變異矩陣
     mu = returns.mean()
@@ -196,7 +197,7 @@ if st.session_state.analysis_started:
                                       method='SLSQP', bounds=bounds, constraints=constraints)
             sharpe_ret, sharpe_vol = get_portfolio_performance(opt_sharpe.x, mu, S, rf_rate)
             
-            # 將結果存回全域變數 best_weights，以便 TAB 6 & 7 使用
+            # 將結果存回變數 best_weights，以便 TAB 6 & 7 使用
             best_weights = opt_sharpe.x 
 
             # B. 最小波動率組合 (MVP)
@@ -205,8 +206,8 @@ if st.session_state.analysis_started:
             min_vol_ret, min_vol_vol = get_portfolio_performance(opt_vol.x, mu, S, rf_rate)
 
             # C. 繪製效率前緣曲線 (Efficient Frontier)
-            # 抓取從 MVP 到 市場最高報酬之間的目標報酬率
-            target_returns = np.linspace(min_vol_ret, max(sharpe_ret, sim_res[1].max()) * 1.02, 50)
+            # 抓取從 MVP 到 (最大夏普 or 模擬最大值) 之間的目標報酬率
+            target_returns = np.linspace(min_vol_ret, max(sharpe_ret, sim_res[1].max()) * 1.05, 50)
             frontier_vol = []
             
             for t_ret in target_returns:
@@ -222,78 +223,226 @@ if st.session_state.analysis_started:
             # 3. 繪圖
             fig, ax = plt.subplots(figsize=(10, 6))
             
-            # (1) 隨機模擬點
-            sc = ax.scatter(sim_res[0,:], sim_res[1,:], c=sim_res[2,:], cmap='viridis', s=10, alpha=0.3, label='Random Portfolios')
-            plt.colorbar(sc, label='Sharp ratio')
+            # (1) 隨機模擬點 (背景)
+            sc = ax.scatter(sim_res[0,:], sim_res[1,:], c=sim_res[2,:], cmap='viridis', s=15, alpha=0.4, label='Random Portfolios')
+            plt.colorbar(sc, label='Sharpe Ratio')
             
-            # (2) 效率前緣線
-            ax.plot(frontier_vol, target_returns, 'b--', linewidth=2, label='Efficient Frontier')
+            # (2) 效率前緣線 (藍線)
+            ax.plot(frontier_vol, target_returns, 'b-', linewidth=2.5, label='Efficient Frontier')
             
             # (3) 個別資產點
             asset_ret = mu * 252
             asset_vol = np.sqrt(np.diag(S)) * np.sqrt(252)
-            ax.scatter(asset_vol, asset_ret, marker='o', color='grey', s=40, alpha=0.8, label='Individual Assets')
+            ax.scatter(asset_vol, asset_ret, marker='o', color='grey', s=50, label='Assets')
             for i, txt in enumerate(returns.columns):
-                ax.annotate(txt, (asset_vol[i], asset_ret[i]), xytext=(5,5), textcoords='offset points', fontsize=9)
+                ax.annotate(txt, (asset_vol[i], asset_ret[i]), xytext=(5,0), textcoords='offset points')
 
             # (4) 標記關鍵組合
-            ax.scatter(min_vol_vol, min_vol_ret, marker='*', color='orange', s=250, edgecolors='black', label='Minimum Variance Portfolio (MVP)', zorder=5)
-            ax.scatter(sharpe_vol, sharpe_ret, marker='*', color='red', s=250, edgecolors='black', label='Maximum Sharpe Ratio (MSR)', zorder=5)
+            # MVP (橘色星星)
+            ax.scatter(min_vol_vol, min_vol_ret, marker='*', color='orange', s=250, edgecolors='black', label='Min Volatility (MVP)', zorder=10)
+            # MSR (紫色星星)
+            ax.scatter(sharpe_vol, sharpe_ret, marker='*', color='purple', s=250, edgecolors='black', label='Max Sharpe (MSR)', zorder=10)
             
-            ax.set_title("Modern Portfolio Theory: Efficient Frontier", fontsize=14)
+            # (5) 資本市場線 (CML - 綠色虛線)
+            # 定義 CML 的 X 軸範圍 (從 0 到 最大波動率的 1.2 倍)
+            cml_x = np.linspace(0, max(sim_res[0].max(), sharpe_vol)*1.2, 100)
+            # CML 公式: Rf + Sharpe * Sigma
+            cml_slope = (sharpe_ret - rf_rate) / sharpe_vol
+            cml_y = rf_rate + cml_slope * cml_x
+            ax.plot(cml_x, cml_y, 'g--', label='Capital Market Line (CML)', alpha=0.7)
+
+            # 圖表美化
+            ax.set_title(f"Efficient Frontier & Optimal Portfolios (Rf={rf_rate*100:.2f}%)", fontsize=14)
             ax.set_xlabel("Annualized Volatility (Risk)")
-            ax.set_ylabel("Annualized Expected Return (Return)")
+            ax.set_ylabel("Annualized Expected Return")
+            ax.xaxis.set_major_formatter(mtick.PercentFormatter(1.0))
+            ax.yaxis.set_major_formatter(mtick.PercentFormatter(1.0))
+            ax.set_xlim(left=0)
             ax.legend(loc='best')
+
             st.pyplot(fig)
 
         with col_info:
-            st.write("### 🏆 MSR 最佳權重")
-            df_weights = pd.DataFrame({'資產': returns.columns, '比例': best_weights * 100})
-            df_weights = df_weights[df_weights['比例'] > 0.01].sort_values(by='比例', ascending=False)
+            # --- 圓餅圖 1: 最大夏普 (MSR) ---
+            st.write("### 🏆 最大夏普配置")
+            df_sharpe = pd.DataFrame({'資產': returns.columns, '比例': best_weights * 100})
+            df_sharpe = df_sharpe.sort_values(by='比例', ascending=False)
             
-            # 圓餅圖
-            fig_pie, ax_pie = plt.subplots()
-            ax_pie.pie(df_weights['比例'], labels=df_weights['資產'], autopct='%1.1f%%', startangle=140, textprops={'fontsize': 8})
-            ax_pie.axis('equal')
-            st.pyplot(fig_pie)
+            fig_pie1, ax_pie1 = plt.subplots(figsize=(4, 4))
+            ax_pie1.pie(df_sharpe['比例'], labels=df_sharpe['資產'], autopct='%1.1f%%', startangle=90)
+            st.pyplot(fig_pie1)
             
-            st.dataframe(df_weights.style.format({'比例': '{:.2f}%'}), use_container_width=True)
-            
-            st.metric("最佳年化報酬", f"{sharpe_ret:.2%}")
-            st.metric("最佳年化波動", f"{sharpe_vol:.2%}")
+            st.dataframe(df_sharpe.style.format({'比例': '{:.2f}%'}), hide_index=True)
+            st.caption(f"回報: {sharpe_ret:.2%} / 風險: {sharpe_vol:.2%}")
 
-    # --- TAB 6 修改：僅針對 TAB5 最佳組合進行預測 ---
+            st.markdown("---")
+
+            # --- 圓餅圖 2: 最小波動 (MVP) ---
+            st.write("### 🛡️ 最小波動配置")
+            df_mvp = pd.DataFrame({'資產': returns.columns, '比例': opt_vol.x * 100})
+            df_mvp = df_mvp.sort_values(by='比例', ascending=False)
+            
+            fig_pie2, ax_pie2 = plt.subplots(figsize=(4, 4))
+            ax_pie2.pie(df_mvp['比例'], labels=df_mvp['資產'], autopct='%1.1f%%', startangle=90)
+            st.pyplot(fig_pie2)
+            
+            st.dataframe(df_mvp.style.format({'比例': '{:.2f}%'}), hide_index=True)
+            st.caption(f"回報: {min_vol_ret:.2%} / 風險: {min_vol_vol:.2%}")
+            
+# --- TAB 6: 混合語言版 (介面優化：字體縮小 / 明確標示 MSR) ---
     with tab6:
-        st.subheader("🔮 最佳投資組合未來預測 (GBM)")
+        # 修改 1: 將標題改小一點 (原本是 subheader，現在改用 markdown ####)
+        st.markdown("#### 🔮 最佳投資組合未來預測 (GBM 模型)")
+
+        # 1. 模擬參數設定
+        n_sim_total = 1000  # 模擬 1000 次
+        n_plot = 50         # 畫圖只畫前 50 條
         
-        # 1. 計算最佳組合的歷史報酬率序列
+        # 2. 準備組合參數 (來自 Tab 5 的最佳權重 - MSR)
         port_returns_series = (returns * best_weights).sum(axis=1)
-        
-        # 2. 取得組合的年化參數
         mu_p = port_returns_series.mean() * 252
         sigma_p = port_returns_series.std() * np.sqrt(252)
-        s0 = initial_cap  # 模擬起點設定為初始本金
+        
+        s0 = initial_cap
         dt = 1/252
         
-        # 3. 執行 GBM 模擬 (維持原有的 50 條路徑邏輯)
-        sim_paths = np.zeros((forecast_len, 50))
+        # 3. 執行 GBM 隨機漫步模擬
+        sim_paths = np.zeros((forecast_len, n_sim_total))
         sim_paths[0] = s0
         
         drift = (mu_p - 0.5 * sigma_p**2) * dt
         shock = sigma_p * np.sqrt(dt)
         
+        z_matrix = np.random.normal(0, 1, (forecast_len - 1, n_sim_total))
+        
         for t in range(1, forecast_len):
-            z = np.random.normal(0, 1, 50)
-            sim_paths[t] = sim_paths[t-1] * np.exp(drift + shock * z)
+            sim_paths[t] = sim_paths[t-1] * np.exp(drift + shock * z_matrix[t-1])
             
-        # 4. 繪製圖表
-        st.line_chart(sim_paths)
+        # 4. 繪製路徑圖
+        st.write(f"**📈 資產路徑模擬 (顯示前 {n_plot} 條 / 共 {n_sim_total} 次)**")
+        st.line_chart(sim_paths[:, :n_plot])
         
-        # 5. 輸出組合預測基準資訊
-        st.write(f"預測基準：Tab 5 計算之最佳夏普組合 (MSR)")
-        st.info(f"組合年化預期報酬: {mu_p:.2%}, 年化波動率 (風險): {sigma_p:.2%}")
+        # 修改 2: 在圖表下方加入小字的說明 (Description)
+        st.markdown(f"""
+        <div style="font-size: 12px; color: #666; margin-top: -10px; margin-bottom: 20px;">
+            ℹ️ <b>模擬基準說明：</b> 此預測是基於 Tab 5 算出的 <b>「最大夏普比率組合 (Max Sharpe Ratio)」</b> 進行推估。<br>
+            參數設定：年化預期報酬 (μ) = <b>{mu_p:.2%}</b>，年化波動率 (σ) = <b>{sigma_p:.2%}</b>。
+        </div>
+        """, unsafe_allow_html=True)
         
-    # --- TAB 7: 壓力測試 ---
+        # 5. 統計數據計算
+        final_values = sim_paths[-1, :]
+        
+        # (1) 基礎統計
+        mean_end = np.mean(final_values)
+        median_end = np.median(final_values)
+        max_profit = np.max(final_values) - s0
+        prob_profit = np.sum(final_values > s0) / n_sim_total
+        
+        # (2) 風險溢酬
+        rf_end_value = s0 * np.exp(rf_rate * (forecast_len / 252))
+        risk_premium = mean_end - rf_end_value
+        
+        # (3) 年化波動率
+        log_returns = np.log(final_values / s0)
+        realized_vol = np.std(log_returns) / np.sqrt(forecast_len / 252)
+        
+        # (4) 風險值
+        var_95 = np.percentile(final_values, 5)
+        cvar_95 = final_values[final_values <= var_95].mean()
+
+        # 6. 顯示統計指標 (標題也縮小)
+        st.markdown("#### 📊 預測結果統計分析")
+        col_stat1, col_stat2, col_stat3 = st.columns(3)
+        
+        with col_stat1:
+            st.metric("平均期末資產", f"${mean_end:,.0f}", delta=f"{(mean_end/s0 -1):.2%}")
+            st.metric("中位數資產", f"${median_end:,.0f}")
+            st.metric("年化波動率", f"{realized_vol:.2%}")
+
+        with col_stat2:
+            st.metric("正報酬機率 (>本金)", f"{prob_profit:.1%}")
+            st.metric("預期最大獲利 (淨利)", f"${max_profit:,.0f}")
+            st.metric("預期風險溢酬", f"${risk_premium:,.0f}", help=f"平均終值 - 無風險利率終值 (${rf_end_value:,.0f})")
+
+        with col_stat3:
+            st.markdown("**⚠️ 下檔風險 (Tail Risk)**") # 改用 markdown 粗體取代 subheader
+            st.metric("風險值 VaR (95%)", f"${var_95:,.0f}", delta=f"{(var_95/s0 -1):.2%}", delta_color="inverse")
+            st.caption(f"條件風險值 CVaR (最差5%平均): ${cvar_95:,.0f}")
+
+        # 7. 分佈擬合分析
+        st.markdown("#### 📉 機率分佈擬合分析")
+        
+        dist_candidates = {
+            "Log-Normal": stats.lognorm,
+            "Gamma": stats.gamma,
+            "Student's t": stats.t,
+            "Chi-Squared": stats.chi2,
+            "Beta": stats.beta
+        }
+        
+        fit_results = []
+        
+        with st.spinner("正在計算最佳擬合模型..."):
+            for name, dist in dist_candidates.items():
+                try:
+                    params = dist.fit(final_values)
+                    D, p = stats.kstest(final_values, dist.cdf, args=params)
+                    fit_results.append({
+                        "Distribution": name,
+                        "D_Statistic": D,
+                        "p_value": p,
+                        "params": params,
+                        "model": dist
+                    })
+                except:
+                    continue
+
+        fit_results.sort(key=lambda x: x['D_Statistic'])
+        best_fit = fit_results[0]
+        
+        col_plot, col_rank = st.columns([3, 1])
+        
+        with col_plot:
+            fig_hist, ax_hist = plt.subplots(figsize=(10, 6))
+            
+            ax_hist.hist(final_values, bins=60, density=True, alpha=0.5, color='lightgray', label='Simulated Data', edgecolor='white')
+            
+            x_fit = np.linspace(np.min(final_values), np.max(final_values), 200)
+            winner_model = best_fit['model']
+            winner_params = best_fit['params']
+            pdf_fit = winner_model.pdf(x_fit, *winner_params)
+            
+            ax_hist.plot(x_fit, pdf_fit, 'r-', lw=3, label=f"Best Fit: {best_fit['Distribution']}")
+            
+            ax_hist.axvline(s0, color='black', linestyle='--', linewidth=1, label='Initial Capital')
+            ax_hist.axvline(mean_end, color='blue', linestyle=':', linewidth=1.5, label='Mean Value')
+
+            ax_hist.set_title(f"Forecast Distribution & Best Fit Model ({forecast_len} Days)")
+            ax_hist.set_xlabel("Portfolio Value ($)")
+            ax_hist.set_ylabel("Probability Density")
+            ax_hist.legend()
+            
+            import matplotlib.ticker as mticker
+            ax_hist.xaxis.set_major_formatter(mticker.StrMethodFormatter('${x:,.0f}'))
+            
+            st.pyplot(fig_hist)
+            
+        with col_rank:
+            st.markdown("**🏆 擬合準確度排名**")
+            st.caption("KS 統計量 (越低越準)")
+            
+            rank_data = []
+            for res in fit_results:
+                rank_data.append({
+                    "分佈模型": res['Distribution'],
+                    "KS 差異值 (D)": f"{res['D_Statistic']:.4f}"
+                })
+            st.dataframe(pd.DataFrame(rank_data), hide_index=True)
+            
+            # 修改 3: 最後的總結也改用小字 caption
+            st.caption(f"✅ 經統計檢定，最佳擬合模型為： **{best_fit['Distribution']}**")        
+        # --- TAB 7: 壓力測試 ---
         with tab7:
             st.subheader("🚨 投資組合壓力測試 (Stress Test)")
             
@@ -344,7 +493,3 @@ if st.session_state.analysis_started:
                 st.table(pd.DataFrame(scene_data))
     
             st.info(f"💡 註：目前組合的加權 Beta 為 **{port_beta:.2f}**。這代表當大盤下跌 1% 時，預計你的組合會隨之變動 {abs(port_beta):.2f}%。")
-
-
-
-
