@@ -84,7 +84,7 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
     st.success(f"✅ 成功載入 {len(df_prices.columns)} 檔資產數據！")
     st.download_button("📥 下載調整後數據 (CSV)", df_prices.to_csv().encode('utf-8'), "data.csv")
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 統計", "🔗 相關性", "💰 模擬", "📐 市場模型", "⚖️ 效率前緣", "🔮 預測", "🚨 壓力測試"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📊 統計", "🔗 相關性", "💰 模擬", "📐 市場模型", "⚖️ 效率前緣", "🔮 預測", "🚨 壓力測試"])
 
     with tab1:
         st.subheader("📋 統計特徵")
@@ -259,3 +259,4 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
                 st.table(pd.DataFrame(scene_data))
     
             st.info(f"💡 註：目前組合的加權 Beta 為 **{port_beta:.2f}**。這代表當大盤下跌 1% 時，預計你的組合會隨之變動 {abs(port_beta):.2f}%。")
+
