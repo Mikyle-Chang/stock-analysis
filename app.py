@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 from scipy import stats
 import yfinance as yf
 from datetime import datetime, timedelta
+import scipy.optimize as sco
+import matplotlib.ticker as mtick
 
 # --- 1. 頁面設定 ---
 st.set_page_config(page_title="全球投資組合分析系統", layout="wide", page_icon="📈")
@@ -20,6 +22,16 @@ def calculate_mdd(series):
     cum_max = series.cummax()
     drawdown = (series - cum_max) / cum_max
     return drawdown.min(), drawdown
+def get_portfolio_performance(weights, mean_returns, cov_matrix, rf_rate):
+    """計算組合的預期年化報酬、波動率與夏普比率"""
+    port_ret = np.sum(mean_returns * weights)
+    port_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+    return port_ret, port_std
+
+def neg_sharpe_ratio(weights, mean_returns, cov_matrix, rf_rate):
+    """計算負夏普比率（用於優化器最小化目標）"""
+    p_ret, p_std = get_portfolio_performance(weights, mean_returns, cov_matrix, rf_rate)
+    return -(p_ret - rf_rate) / p_std
 
 # --- 3. 強化型數據抓取函數 ---
 @st.cache_data(ttl=3600)
@@ -270,40 +282,73 @@ if st.session_state.analysis_started:
     
             st.info(f"💡 註：目前組合的加權 Beta 為 **{port_beta:.2f}**。這代表當大盤下跌 1% 時，預計你的組合會隨之變動 {abs(port_beta):.2f}%。")
 
-# --- TAB 8: 新增 PRO 功能 (數值最佳化) ---
-    with tab8:
+with tab8:
         st.subheader("🧬 PRO 最佳化分析 (Scipy 精確求解)")
         st.info("此標籤頁使用 Scipy 最佳化算法尋找理論上的最佳配置，並與蒙地卡羅模擬進行比對。")
         
+        # 1. 定義必要變數
+        mu = returns.mean() * 252
+        S = returns.cov() * 252
         num_assets = len(returns.columns)
+        
+        # 2. 設定最佳化約束條件
+        # 'eq' 代表相等於 0，即所有權重和減 1 等於 0
         constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
+        # 設定權重邊界 (0% ~ 100%)
         bounds = tuple((0, 1) for _ in range(num_assets))
+        # 初始猜測值 (平均分配)
         init_guess = num_assets * [1. / num_assets,]
 
-        # 數值求解
-        opt_sharpe = sco.minimize(neg_sharpe_ratio, init_guess, args=(mu, S, rf_rate), method='SLSQP', bounds=bounds, constraints=constraints)
-        pro_weights = opt_sharpe.x
-        pro_ret, pro_vol = get_portfolio_performance(pro_weights, mu, S, rf_rate)
-
-        col_pro1, col_pro2 = st.columns([3, 2])
-        with col_pro1:
-            fig_pro, ax_pro = plt.subplots(figsize=(10, 6))
-            ax_pro.scatter(sim_res[1], sim_res[0], c=sim_res[2], cmap='viridis', s=10, alpha=0.2, label='Random Sim')
-            ax_pro.scatter(pro_vol, pro_ret, color='purple', marker='*', s=300, label='Math Optimal (MSR)')
+        # 3. 執行數值求解 (SLSQP 演算法)
+        try:
+            opt_sharpe = sco.minimize(
+                neg_sharpe_ratio, 
+                init_guess, 
+                args=(mu, S, rf_rate), 
+                method='SLSQP', 
+                bounds=bounds, 
+                constraints=constraints
+            )
             
-            # 資本市場線
-            cml_x = np.linspace(0, sim_res[1].max(), 100)
-            cml_y = rf_rate + ((pro_ret - rf_rate) / pro_vol) * cml_x
-            ax_pro.plot(cml_x, cml_y, 'g--', label='CML')
-            
-            ax_pro.set_xlabel("Risk (Std)"); ax_pro.set_ylabel("Return"); ax_pro.legend()
-            ax_pro.xaxis.set_major_formatter(mtick.PercentFormatter(1.0))
-            ax_pro.yaxis.set_major_formatter(mtick.PercentFormatter(1.0))
-            st.pyplot(fig_pro)
+            if not opt_sharpe.success:
+                st.error("最佳化求解失敗，請檢查數據完整性。")
+                st.stop()
 
-        with col_pro2:
-            st.write("### 🧬 數學最佳權重")
-            df_pro = pd.DataFrame({'資產': returns.columns, '精確比例': pro_weights * 100}).sort_values('精確比例', ascending=False)
-            st.dataframe(df_pro.style.format({'精確比例': '{:.2f}%'}))
-            st.metric("理論最高夏普", f"{(pro_ret - rf_rate)/pro_vol:.2f}")
+            pro_weights = opt_sharpe.x
+            pro_ret, pro_vol = get_portfolio_performance(pro_weights, mu, S, rf_rate)
+
+            # 4. 繪製視覺化圖表
+            col_pro1, col_pro2 = st.columns([3, 2])
+            
+            with col_pro1:
+                fig_pro, ax_pro = plt.subplots(figsize=(10, 6))
+                # 繪製蒙地卡羅點 (淡化作為背景)
+                sc = ax_pro.scatter(sim_res[1], sim_res[0], c=sim_res[2], cmap='viridis', s=10, alpha=0.15, label='Random Sim')
+                # 繪製數學最佳解點
+                ax_pro.scatter(pro_vol, pro_ret, color='purple', marker='*', s=300, label='Math Optimal (MSR)', edgecolors='white')
+                
+                # 資本市場線 (CML): 從無風險利率出發經過最佳點的射線
+                cml_x = np.linspace(0, sim_res[1].max(), 100)
+                cml_y = rf_rate + ((pro_ret - rf_rate) / pro_vol) * cml_x
+                ax_pro.plot(cml_x, cml_y, color='green', linestyle='--', linewidth=2, label='Capital Market Line')
+                
+                ax_pro.set_xlabel("Annualized Volatility (Risk)"); ax_pro.set_ylabel("Annualized Expected Return")
+                ax_pro.legend()
+                ax_pro.xaxis.set_major_formatter(mtick.PercentFormatter(1.0))
+                ax_pro.yaxis.set_major_formatter(mtick.PercentFormatter(1.0))
+                st.pyplot(fig_pro)
+
+            with col_pro2:
+                st.write("### 🧬 數學最佳權重")
+                df_pro = pd.DataFrame({'資產': returns.columns, '精確比例': pro_weights * 100})
+                df_pro = df_pro.sort_values('精確比例', ascending=False)
+                
+                st.metric("理論最高夏普比率", f"{(pro_ret - rf_rate)/pro_vol:.3f}")
+                st.metric("預期年化報酬", f"{pro_ret:.2%}")
+                st.metric("預期年化波動", f"{pro_vol:.2%}")
+                
+                st.dataframe(df_pro.style.format({'精確比例': '{:.2f}%'}), use_container_width=True)
+                
+        except Exception as e:
+            st.error(f"計算過程中發生錯誤: {e}")
 
