@@ -25,7 +25,6 @@ def calculate_mdd(series):
 @st.cache_data(ttl=3600)
 def fetch_stock_data(tickers_tw, tickers_us, start, end):
     data_dict = {}
-    # 確保台股基準 0050 與美股基準 SPY 都會被抓取
     unique_tw = list(set(tickers_tw + ['0050']))
     unique_us = list(set(tickers_us + ['SPY']))
     
@@ -127,25 +126,17 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
 
     with tab4:
         st.subheader("📐 市場模型 (Beta)")
-        
         beta_data = []
-        # 遍歷所有資產，排除基準標的本身
         for s in [c for c in returns.columns if c not in ['0050', 'SPY']]:
-            # --- 核心修改：判斷資產類型選擇基準 ---
             if s.isdigit() and '0050' in returns.columns:
-                mkt_ref = '0050' # 台股用 0050
+                mkt_ref = '0050'
             elif not s.isdigit() and 'SPY' in returns.columns:
-                mkt_ref = 'SPY'  # 美股用 SPY
-            else:
-                continue
-                
-            # 針對該資產與其對應基準進行日期對齊
+                mkt_ref = 'SPY'
+            else: continue
             common_df = pd.concat([returns[mkt_ref], returns[s]], axis=1).dropna()
-            
             if len(common_df) > 10:
                 slope, _, r_val, _, _ = stats.linregress(common_df.iloc[:,0], common_df.iloc[:,1])
                 beta_data.append({"Asset": s, "Benchmark": mkt_ref, "Beta": slope, "R2": r_val**2})
-        
         st.table(pd.DataFrame(beta_data))
 
     with tab5:
@@ -186,16 +177,33 @@ if st.sidebar.button('🚀 啟動全方位分析', type="primary"):
             st.pyplot(fig_pie)
             st.dataframe(df_weights.style.format({'比例': '{:.2f}%'}))
 
+    # --- TAB 6 修改：僅針對 TAB5 最佳組合進行預測 ---
     with tab6:
-        st.subheader("🔮 股價未來模擬 (GBM)")
-        tgt = st.selectbox("標的", returns.columns)
-        s0, mu, sigma = df_prices[tgt].iloc[-1], returns[tgt].mean() * 252, returns[tgt].std() * np.sqrt(252)
+        st.subheader("🔮 最佳投資組合未來預測 (GBM)")
+        
+        # 1. 計算最佳組合的歷史報酬率序列
+        port_returns_series = (returns * best_weights).sum(axis=1)
+        
+        # 2. 取得組合的年化參數
+        mu_p = port_returns_series.mean() * 252
+        sigma_p = port_returns_series.std() * np.sqrt(252)
+        s0 = initial_cap  # 模擬起點設定為初始本金
         dt = 1/252
+        
+        # 3. 執行 GBM 模擬 (維持原有的 50 條路徑邏輯)
         sim_paths = np.zeros((forecast_len, 50))
         sim_paths[0] = s0
-        drift = (mu - 0.5 * sigma**2) * dt
-        shock = sigma * np.sqrt(dt)
+        
+        drift = (mu_p - 0.5 * sigma_p**2) * dt
+        shock = sigma_p * np.sqrt(dt)
+        
         for t in range(1, forecast_len):
             z = np.random.normal(0, 1, 50)
             sim_paths[t] = sim_paths[t-1] * np.exp(drift + shock * z)
+            
+        # 4. 繪製圖表
         st.line_chart(sim_paths)
+        
+        # 5. 輸出組合預測基準資訊
+        st.write(f"預測基準：Tab 5 計算之最佳夏普組合 (MSR)")
+        st.info(f"組合年化預期報酬: {mu_p:.2%}, 年化波動率 (風險): {sigma_p:.2%}")
